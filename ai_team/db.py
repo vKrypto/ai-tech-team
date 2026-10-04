@@ -38,8 +38,29 @@ _conn.executescript(
         content TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_events_task ON events(task_id);
+    -- The task's conversation: turn 1 is the original request, later turns are follow-ups.
+    CREATE TABLE IF NOT EXISTS messages (
+        id      INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id INTEGER NOT NULL REFERENCES tasks(id),
+        turn    INTEGER NOT NULL,
+        role    TEXT NOT NULL,         -- user | assistant | system
+        content TEXT NOT NULL,
+        ts      TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_messages_task ON messages(task_id);
     """
 )
+# Migrations for databases created before these columns existed.
+_cols = {r["name"] for r in _conn.execute("PRAGMA table_info(tasks)")}
+for _col, _ddl in (("verify_state", "TEXT"),     # NULL | queued | running | done | partial | not_done | error
+                   ("verification", "TEXT"),     # the verifier's report
+                   ("verified_at", "TEXT")):
+    if _col not in _cols:
+        _conn.execute(f"ALTER TABLE tasks ADD COLUMN {_col} {_ddl}")
+if "turn" not in _cols:
+    _conn.execute("ALTER TABLE tasks ADD COLUMN turn INTEGER NOT NULL DEFAULT 1")
+    _conn.execute("INSERT INTO messages (task_id, turn, role, content, ts) "
+                  "SELECT id, 1, 'user', text, created_at FROM tasks")
 
 
 def now() -> str:
@@ -57,6 +78,8 @@ def _row(r: sqlite3.Row | None) -> dict | None:
 def create_task(text: str) -> dict:
     with _lock:
         cur = _conn.execute("INSERT INTO tasks (text, created_at) VALUES (?, ?)", (text, now()))
+        _conn.execute("INSERT INTO messages (task_id, turn, role, content, ts) VALUES (?, 1, 'user', ?, ?)",
+                      (cur.lastrowid, text, now()))
     return get_task(cur.lastrowid)
 
 
@@ -85,21 +108,27 @@ def update_task(task_id: int, **fields) -> None:
         _conn.execute(f"UPDATE tasks SET {cols} WHERE id = ?", (*fields.values(), task_id))
 
 
-def claim_next_queued() -> dict | None:
-    """Atomically move the oldest queued task to running and return it."""
+def claim_next_job() -> tuple[str, dict] | None:
+    """Atomically claim the oldest pending job: ("run", task) for a queued turn, or ("verify", task)
+    for a queued verification. Returns None when there is nothing to do."""
     with _lock:
-        r = _conn.execute("SELECT id FROM tasks WHERE status = 'queued' ORDER BY id LIMIT 1").fetchone()
+        r = _conn.execute("SELECT id, status, verify_state FROM tasks WHERE status = 'queued' "
+                          "OR verify_state = 'queued' ORDER BY id LIMIT 1").fetchone()
         if r is None:
             return None
-        _conn.execute("UPDATE tasks SET status = 'running', started_at = ?, error = NULL WHERE id = ?",
-                      (now(), r["id"]))
-    return get_task(r["id"])
+        if r["status"] == "queued":
+            _conn.execute("UPDATE tasks SET status = 'running', started_at = ?, error = NULL WHERE id = ?",
+                          (now(), r["id"]))
+            return "run", get_task(r["id"])
+        _conn.execute("UPDATE tasks SET verify_state = 'running' WHERE id = ?", (r["id"],))
+    return "verify", get_task(r["id"])
 
 
 def requeue_running() -> None:
-    """On startup, tasks left 'running' by a crash go back to the queue."""
+    """On startup, work left 'running' by a crash goes back to the queue."""
     with _lock:
         _conn.execute("UPDATE tasks SET status = 'queued' WHERE status = 'running'")
+        _conn.execute("UPDATE tasks SET verify_state = 'queued' WHERE verify_state = 'running'")
 
 
 def add_event(task_id: int, agent: str, kind: str, content: str) -> None:
@@ -122,3 +151,21 @@ def counts() -> dict:
 def distinct(col: str) -> list[str]:
     assert col in ("project", "task_type")
     return [r[0] for r in _conn.execute(f"SELECT DISTINCT {col} FROM tasks WHERE {col} IS NOT NULL ORDER BY 1")]
+
+
+def add_message(task_id: int, turn: int, role: str, content: str) -> None:
+    with _lock:
+        _conn.execute("INSERT INTO messages (task_id, turn, role, content, ts) VALUES (?, ?, ?, ?, ?)",
+                      (task_id, turn, role, content, now()))
+
+
+def list_messages(task_id: int) -> list[dict]:
+    rows = _conn.execute("SELECT * FROM messages WHERE task_id = ? ORDER BY id", (task_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_messages(task_id: int, from_turn: int, roles: tuple[str, ...] = ("user", "assistant", "system")) -> None:
+    marks = ",".join("?" * len(roles))
+    with _lock:
+        _conn.execute(f"DELETE FROM messages WHERE task_id = ? AND turn >= ? AND role IN ({marks})",
+                      (task_id, from_turn, *roles))

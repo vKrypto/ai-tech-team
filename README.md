@@ -19,6 +19,16 @@ cd ai-team
 - Config comes from `ai-team/.env` (`env_file`). Edit it, then re-run `./deploy.sh`. Comments must be on
   their own lines; Docker keeps inline `# …` as part of the value.
 - Task DB lives on the host at `ai-team/data/tasks.db`.
+- **Every deploy is verified** before the script reports success:
+  - the new container is running, with no swarm rollback
+  - the Docker healthcheck reports healthy
+  - API and dashboard answer on the port, with the expected backend and the workspace mounted
+  - isolation holds (no git, `.git` masked, `ai-team/` hidden)
+  - the backend has its credentials or gateway
+
+  On any failure it prints the service tasks and the last logs, then exits 1. A version that doesn't
+  start is rolled back by swarm automatically (`update_config.failure_action: rollback`).
+  `DEPLOY_TIMEOUT` (default 180s) bounds the wait.
 - Logs: `docker service logs -f ai_team_app` · Remove: `docker stack rm ai_team`.
 - Every deploy builds a uniquely tagged image so the service actually rolls. Deploys also regenerate
   `stack.generated.yml`, so **re-run after adding a repo** to get its `.git` masked.
@@ -38,11 +48,17 @@ not pay-as-you-go API keys**.
 
 | Backend | Who runs each role | Auth (`./deploy.sh` does the login) | Where the credential lives |
 |---|---|---|---|
-| `claude` | Claude Code headless (`claude -p`) | `claude setup-token` (browser), ~1-year inference-only token | encrypted swarm secret → `/run/secrets/claude_oauth_token` |
+| `claude` | Claude Code headless (`claude -p`) | `claude setup-token` (browser), ~1-year inference-only token | `ai-team/data/claude/oauth_token` (mode 600, gitignored) → swarm secret → `/run/secrets/claude_oauth_token` |
 | `codex` | Codex CLI headless (`codex exec --json`) | `codex login --device-auth` (ChatGPT plan), run inside the image | `ai-team/data/codex/` (mode 700, gitignored), mounted at `/data/codex` |
 | `langchain` | LangChain `create_agent` + `tools.py` | `AI_TEAM_PROVIDER` / base URL | `.env` |
 
-- **Rotate:** `./deploy.sh --relogin` gets a new Claude token or a new Codex login.
+- **Checked before every deploy:** the stored credential is tested with one tiny real call ("Reply with
+  exactly: OK") from a throwaway container of the new image. If it's missing or rejected, e.g.
+  `401 OAuth access token is invalid`, the script logs in again, updates the file and re-checks. Login
+  needs an interactive terminal; non-interactive runs stop with a clear error before touching the stack.
+- **Rotate on demand:** `./deploy.sh --relogin`.
+- **The Claude swarm secret is named after the token's hash**, so it's recreated only when the token changes.
+- **Non-interactive seeding:** `CLAUDE_CODE_OAUTH_TOKEN=… ./deploy.sh` saves the given token to the file.
 - **Both CLIs log in separately from the host CLIs.** Copying the host's stored login would break: Claude's
   access token expires within hours, and both CLIs rotate refresh tokens, so host and container would log
   each other out.
@@ -207,17 +223,25 @@ sequenceDiagram
 flowchart TD
     A["./deploy.sh [--relogin]"] --> B["read .env<br/>root working dir, backend"]
     B --> C{"swarm active?"}
-    C -->|no| C1["docker swarm init<br/>bound to 127.0.0.1"] --> D
-    C -->|yes| D{"backend"}
-    D -->|claude| E{"token secret exists<br/>and no --relogin?"}
-    E -->|no| E1["claude setup-token in browser<br/>paste token<br/>docker secret create"] --> F
-    E -->|yes| F
-    D -->|codex or langchain| F["docker build<br/>unique image tag"]
-    F --> G{"backend is codex<br/>and not logged in,<br/>or --relogin?"}
-    G -->|yes| G1["codex login --device-auth<br/>inside the image<br/>saved to data/codex"] --> H
-    G -->|no| H["generate stack.generated.yml<br/>tmpfs over every .git<br/>/dev/null over submodule .git files<br/>attach token secret"]
+    C -->|yes| F["docker build<br/>unique image tag"]
+    C -->|no| C1["docker swarm init<br/>bound to 127.0.0.1"] --> F
+    F --> G{"backend"}
+    G -->|"claude or codex"| K{"stored credential works?<br/>one tiny real call"}
+    K -->|"no, or --relogin"| L["log in again<br/>claude setup-token, or<br/>codex login --device-auth<br/>update data/claude or data/codex"] --> K
+    K -->|yes| M["claude only: swarm secret<br/>named by token hash"] --> H
+    G -->|langchain| H["generate stack.generated.yml<br/>tmpfs over every .git<br/>/dev/null over submodule .git files<br/>attach token secret"]
     H --> I["docker stack deploy ai_team<br/>stack.yml + stack.generated.yml"]
-    I --> J["prune old token secrets"]
+    I --> V1{"new container running?<br/>no swarm rollback"}
+    V1 -->|yes| V2{"healthcheck<br/>healthy?"}
+    V2 -->|yes| V3{"API + dashboard on :8765<br/>expected backend,<br/>workspace mounted?"}
+    V3 -->|yes| V4{"isolation: no git,<br/>.git masked,<br/>ai-team hidden?"}
+    V4 -->|yes| V5{"backend credentials<br/>reached the container?"}
+    V5 -->|yes| J["prune old token secrets<br/>✓ deployed and verified"]
+    V1 -->|no| X["✗ print tasks + logs<br/>exit 1"]
+    V2 -->|no| X
+    V3 -->|no| X
+    V4 -->|no| X
+    V5 -->|no| X
 ```
 
 | Module | Responsibility |
@@ -231,8 +255,59 @@ flowchart TD
 | `codex_cli.py` | Codex CLI backend (`codex exec --json`, ChatGPT login state, read-only guard) |
 | `tools.py` | Sandboxed workspace tools for the `langchain` backend |
 | `graph.py` | LangGraph workflow and routing |
-| `orchestrator.py` | Queue worker, status transitions, cancellation, crash recovery |
+| `orchestrator.py` | Queue worker, status transitions, cancellation, crash recovery; runs each turn on the task's checkpointed thread |
+| `memory.py` | LangGraph SQLite checkpointer (`data/checkpoints.db`): team-graph state and agent threads per task |
 | `api.py` | REST API + serves the dashboard |
+
+### Continue chat (follow-ups)
+
+A task is a conversation. Once it's done, failed or cancelled, the dashboard's **Continue this task** box
+(or `POST /api/tasks/{id}/messages {"text": …}`) queues another turn on the same task, like resuming a
+`claude` CLI session. The same team picks it up with its memory:
+
+```mermaid
+flowchart LR
+    U["follow-up text"] --> Q["turn N+1 queued<br/>messages table"]
+    Q --> O["orchestrator<br/>graph.invoke on thread = task id"]
+    O <-->|"restore / save"| CP[("data/checkpoints.db<br/>LangGraph SqliteSaver")]
+    O --> A["each agent resumes its own session"]
+    A --> C1["claude: --resume &lt;session-id&gt;<br/>transcripts in data/claude-home"]
+    A --> C2["codex: exec resume &lt;thread-id&gt;<br/>transcripts in data/codex"]
+    A --> C3["langchain: checkpointer thread<br/>&lt;task&gt;:&lt;role&gt;"]
+    O --> R["outcome appended to the<br/>conversation as turn N+1"]
+```
+
+- **What carries over** in the graph checkpoint (thread = task id): plan, result, review, and each agent's
+  session id. **Reset each turn:** review rounds, approval and the changed-files list.
+- **Every follow-up brief** has the original task, a compact history of earlier turns and the new request.
+  An agent that has no session yet (e.g. tasks from before this feature) still has the full context.
+- **The follow-up reuses the task's triage** (project, agents, tier); it isn't re-triaged.
+- **Retry** re-runs only the latest turn. Retrying turn 1 starts over: re-triage, and all memory for the
+  task is forgotten.
+- **Storage:** everything is local in `ai-team/data/` (SQLite + CLI transcript folders, gitignored).
+  Redis could replace the SQLite checkpointer later (`langgraph-checkpoint-redis`), e.g. for several
+  orchestrator replicas.
+
+### Re-verify (is it actually done?)
+
+**Verify** on a finished task, or `POST /api/tasks/{id}/verify`, queues an independent check of the
+**current code** against **every request in the task's conversation**:
+
+- **A separate `verifier` agent**, started fresh each time (no shared session, so it doesn't inherit the team's
+  assumptions). It gets all user requests, the files changed across all turns, and the developer's last
+  summary as *claims to check*.
+- **It reads code and runs tests/builds but must not edit:**
+  - claude: `Read,Grep,Glob,Bash`, with git denied
+  - codex: the step fails if it edits files
+  - langchain: read tools + `run_command`
+- **The report:** a checklist (`[x]` met / `[~]` partly / `[ ]` not met) with evidence, the gaps as concrete
+  fixes, and a final `VERIFICATION: DONE | PARTIAL | NOT_DONE`.
+- **The verdict is stored next to the task** (`verify_state`, `verification`, `verified_at`), shown as a badge,
+  and added to the conversation. It **never changes the task's status**.
+- **On PARTIAL or NOT_DONE,** **Continue with gaps** prefills a follow-up asking the team to fix them. The
+  verifier's report is part of the conversation history the team sees.
+- **It runs through the orchestrator queue** (counts against `AI_TEAM_MAX_PARALLEL`), never while the task
+  itself is running. A new turn or retry clears the earlier verdict as stale.
 
 ### Model selection
 Triage sets `model_tier` (`fast` / `balanced` / `deep`). It maps to `AI_TEAM_MODEL_FAST/BALANCED/DEEP`.
@@ -251,7 +326,7 @@ The provider (`anthropic`, `openai`, `ollama`, …) is global, via `AI_TEAM_PROV
 - In dev mode `run_command` can still *read* files outside the workspace (e.g. `~/.ssh`); the stack doesn't have this gap.
 - The dashboard/API has no auth, and the stack publishes it on the LAN.
 - Polling instead of SSE/websockets; a single process holds the API, triage and orchestrator.
-- No per-task checkpointing: a task interrupted by a restart re-runs from the start.
+- A task interrupted by a restart re-runs its current turn from the start (earlier turns are kept).
 - Cancelling a running task takes effect at the next agent step, not instantly.
 
 ## Next steps (toward the full "company")
