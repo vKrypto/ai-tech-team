@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from langchain.agents import create_agent
 from langchain_core.messages import AIMessage
 
-from . import db, llm
+from . import cli_agent, codex_cli, db, llm
 from .config import settings
 from .tools import make_tools
 
@@ -68,11 +68,26 @@ def run_role(role: Role, task: dict, brief: str, changed: set | None = None) -> 
         log("message", out)
         return out
 
+    system_prompt = (COMMON.format(root=settings.workspace_root, project=meta.get("project", "general"))
+                     + "\n\n" + role.prompt)
+    if settings.backend in ("claude", "codex"):
+        def cancelled():
+            t = db.get_task(tid)
+            return t is not None and t["status"] == "cancelled"
+        changed = changed if changed is not None else set()
+        tier = meta.get("model_tier", "balanced")
+        try:
+            if settings.backend == "claude":
+                return cli_agent.run(role.name, system_prompt, brief, settings.model_for_tier(tier),
+                                     meta.get("project"), log, changed, cancelled)
+            return codex_cli.run(role.name, system_prompt, brief, tier, meta.get("project"), log, changed, cancelled)
+        except InterruptedError:
+            raise Cancelled()
+
     agent = create_agent(
         llm.model_for(meta.get("model_tier", "balanced")),
         make_tools(role.read_only, log, changed),
-        system_prompt=COMMON.format(root=settings.workspace_root, project=meta.get("project", "general"))
-        + "\n\n" + role.prompt,
+        system_prompt=system_prompt,
         name=role.name,
     )
     final = ""

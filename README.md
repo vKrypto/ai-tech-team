@@ -21,7 +21,7 @@ cd ai-team
 - Task DB lives on the host at `ai-team/data/tasks.db`.
 - Logs: `docker service logs -f ai_team_app` · Remove: `docker stack rm ai_team`.
 - Every deploy builds a uniquely tagged image so the service actually rolls. Deploys also regenerate
-  `stack.gitmask.yml`, so **re-run after adding a repo** to get its `.git` masked.
+  `stack.generated.yml`, so **re-run after adding a repo** to get its `.git` masked.
 
 **Isolation in the container.** Bubblewrap can't run inside a container under Docker's AppArmor profile,
 so the container itself is the sandbox:
@@ -30,6 +30,39 @@ so the container itself is the sandbox:
 - Every `.git` dir is covered by an empty tmpfs, and every submodule `.git` file by `/dev/null`.
 - The image has no git binary.
 - It runs as UID 1000, so files the coder writes stay owned by you.
+
+### Agent backends
+
+`AI_TEAM_AGENT_BACKEND` in `.env` picks who runs the agents. The CLI backends use **subscriptions,
+not pay-as-you-go API keys**.
+
+| Backend | Who runs each role | Auth (`./deploy.sh` does the login) | Where the credential lives |
+|---|---|---|---|
+| `claude` | Claude Code headless (`claude -p`) | `claude setup-token` (browser), ~1-year inference-only token | encrypted swarm secret → `/run/secrets/claude_oauth_token` |
+| `codex` | Codex CLI headless (`codex exec --json`) | `codex login --device-auth` (ChatGPT plan), run inside the image | `ai-team/data/codex/` (mode 700, gitignored), mounted at `/data/codex` |
+| `langchain` | LangChain `create_agent` + `tools.py` | `AI_TEAM_PROVIDER` / base URL | `.env` |
+
+- **Rotate:** `./deploy.sh --relogin` gets a new Claude token or a new Codex login.
+- **Both CLIs log in separately from the host CLIs.** Copying the host's stored login would break: Claude's
+  access token expires within hours, and both CLIs rotate refresh tokens, so host and container would log
+  each other out.
+- **Codex's credentials can't be a swarm secret.** Swarm secrets are read-only, but Codex rewrites its
+  tokens when it refreshes them.
+
+**Role limits:**
+- **Claude:**
+  - planner and reviewer: `Read,Grep,Glob`
+  - coder: adds `Edit,Write,Bash`
+  - always denied: `git`, web tools, reading `/run/secrets`
+  - models per tier: `AI_TEAM_CLI_MODEL_*`
+- **Codex:**
+  - Its own sandbox needs bubblewrap, which Docker's AppArmor blocks, so it runs with `--dangerously-bypass-approvals-and-sandbox` and the container is the sandbox.
+  - It can't be limited to read-only tools. Planner and reviewer are told they're read-only, and **a step fails if they change any file**.
+  - Tiers set reasoning effort `low`/`medium`/`high`. `AI_TEAM_CODEX_MODEL_*` empty means your plan's default model.
+
+**Shared caveat:** agents run as the same user that can read their credentials (the Claude token file, or
+`/data/codex/auth.json`, plus the task DB in `/data`). A shell command could print them. Treat credentials
+as exposed to whatever the agents read, and re-login if a repo looks hostile.
 
 ## Run without Docker (dev)
 

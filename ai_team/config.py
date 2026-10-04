@@ -14,6 +14,26 @@ class Settings(BaseSettings):
     hidden_dirs: list[Path] = [APP_DIR]
     db_path: Path = APP_DIR / "data" / "tasks.db"
 
+    # Who runs the agents:
+    #   claude    = Claude Code headless (subscription token from `claude setup-token`)
+    #   codex     = OpenAI Codex CLI headless (ChatGPT subscription, device login)
+    #   langchain = LangChain loop + our tools.py, via `provider`
+    agent_backend: str = "langchain"
+    claude_bin: str = "claude"
+    claude_token_file: Path = Path("/run/secrets/claude_oauth_token")
+    cli_model_fast: str = "haiku"
+    cli_model_balanced: str = "sonnet"
+    cli_model_deep: str = "opus"
+    cli_model_triage: str = "haiku"
+    cli_max_budget_usd: float | None = None
+    codex_bin: str = "codex"
+    codex_home: Path = Path("/home/agent/.codex")
+    # Empty = the Codex default model for your plan; tiers also map to reasoning effort low/medium/high.
+    codex_model_fast: str = ""
+    codex_model_balanced: str = ""
+    codex_model_deep: str = ""
+    codex_model_triage: str = ""
+
     provider: str = "mock"  # mock | anthropic | openai | ollama
     # OpenAI-compatible gateway (e.g. OmniRoute) when provider=openai; key may be blank for keyless gateways.
     base_url: str | None = None
@@ -29,7 +49,23 @@ class Settings(BaseSettings):
     command_timeout: int = 120
     poll_interval: float = 2.0
 
+    @property
+    def backend(self) -> str:
+        return "claude" if self.agent_backend == "cli" else self.agent_backend  # "cli" = old name for claude
+
+    @property
+    def backend_label(self) -> str:
+        return {"claude": "claude-cli", "codex": "codex-cli"}.get(self.backend, self.provider)
+
+    def codex_model_for_tier(self, tier: str) -> str:
+        return {"fast": self.codex_model_fast, "deep": self.codex_model_deep}.get(tier, self.codex_model_balanced)
+
     def model_for_tier(self, tier: str) -> str:
+        if self.backend == "claude":
+            return {"fast": self.cli_model_fast, "deep": self.cli_model_deep}.get(tier, self.cli_model_balanced)
+        if self.backend == "codex":
+            from .codex_cli import model_label
+            return model_label(tier)
         return {"fast": self.model_fast, "deep": self.model_deep}.get(tier, self.model_balanced)
 
 
