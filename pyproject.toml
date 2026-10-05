@@ -1,0 +1,40 @@
+[project]
+name = "ai-team"
+version = "2.0.0"
+description = "Multi-agent platform: schedulers -> orchestrator -> workflow engine -> agent pool"
+requires-python = ">=3.12"
+dependencies = [
+  "langgraph>=1.2",
+  "langgraph-checkpoint-redis>=0.5",
+  "langchain>=1.4",
+  "langchain-openai>=1.6",
+  "langchain-anthropic>=1.7",
+  "redis>=6",
+  "pymongo>=4.10",
+  "fastapi>=0.140",
+  "uvicorn[standard]",
+  "pydantic-settings",
+  "pyyaml",
+  "httpx",
+  "croniter",
+  "icalendar",
+  "recurring-ical-events",
+  "playwright",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "mongomock", "fakeredis"]
+google = ["langchain-google-genai"]
+ollama = ["langchain-ollama"]
+bedrock = ["langchain-aws"]
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

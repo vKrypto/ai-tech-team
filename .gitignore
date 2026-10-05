@@ -3,3 +3,7 @@ data/
 .env
 __pycache__/
 stack.generated.yml
+.pytest_cache
+*.egg-info/
+.env.*
+!.env.example

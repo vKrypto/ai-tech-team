@@ -1,41 +1,114 @@
-# docker stack deploy -c stack.yml -c stack.generated.yml ai_team   (use ./deploy.sh)
+# Production: Docker Swarm stack (Proxmox docker-vm). Deploy with ./deploy.sh --env .env.prod, which builds the
+# image on the target (or pushes it to a registry), logs providers in, ships skills, then runs:
+#   docker --context <target> stack deploy -c stack.yml -c stack.generated.yml ai_team
+# ${VARS} come from deploy.sh's environment. Host paths are paths ON THE TARGET HOST.
+# Local development uses docker-compose.yml instead.
 version: "3.8"
 
+x-app: &app
+  image: ${AI_TEAM_IMAGE:-ai-team:latest}
+  env_file: ${AI_TEAM_ENV_FILE:-.env.prod}
+  logging: &logging
+    driver: json-file
+    options: {max-size: 20m, max-file: "5"}
+  environment: &env
+    AI_TEAM_REDIS_URL: redis://redis:6379/0
+    AI_TEAM_MONGO_URL: mongodb://mongo:27017
+    AI_TEAM_WORKSPACE_ROOT: /workspace
+    AI_TEAM_HIDDEN_DIRS: '["/workspace/ai-team"]'
+    AI_TEAM_DATA_DIR: /data
+    AI_TEAM_HOST: "{{.Service.Name}}.{{.Task.Slot}}"   # stable consumer name: pending work survives restarts
+    GH_CONFIG_DIR: /data/github                        # gh CLI login (deploy.sh), mounted where needed
+    GIT_AUTHOR_NAME: AI Team
+    GIT_AUTHOR_EMAIL: ai-team@localhost
+    GIT_COMMITTER_NAME: AI Team
+    GIT_COMMITTER_EMAIL: ai-team@localhost
+  stop_grace_period: 20s
+
+x-deploy: &deploy
+  replicas: 1
+  restart_policy: {condition: any, delay: 5s}
+  # stop-first: two containers with the same slot name must never consume at the same time.
+  update_config: {order: stop-first, failure_action: rollback, monitor: 45s, parallelism: 1}
+  rollback_config: {order: stop-first}
+
+x-workspace-ro: &workspace-ro
+  - {type: bind, source: "${WORKSPACE_HOST_DIR}", target: /workspace, read_only: true}
+  - {type: tmpfs, target: /workspace/ai-team}
+
 services:
-  app:
-    image: ai-team:latest
-    env_file: .env            # provider, keys, models, orchestrator knobs
-    # Container paths; these override anything the same names hold in .env.
-    environment:
-      AI_TEAM_WORKSPACE_ROOT: /workspace
-      AI_TEAM_DB_PATH: /data/tasks.db
-      AI_TEAM_HIDDEN_DIRS: '["/workspace/ai-team"]'
-      AI_TEAM_CODEX_HOME: /data/codex     # Codex login state (refreshing), on the host in ai-team/data/codex
-    ports:
-      - target: 8765
-        published: ${AI_TEAM_PORT:-8765}
-        mode: host
+  # --- state ------------------------------------------------------------------------------------
+  redis:            # broker (streams), workflow checkpoints, job results, flags. AOF fsync every second.
+    image: redis:8
+    command: >
+      redis-server --appendonly yes --appendfsync everysec --save 300 10 --save 60 1000
+      --maxmemory 1gb --maxmemory-policy noeviction --dir /data
     volumes:
-      # The agents' whole world: the repos folder. Nothing else from the host is visible.
-      - type: bind
-        source: ${WORKSPACE_HOST_DIR}
-        target: /workspace
-      # Hide ai-team/ itself (source, .env, task DB) from the agents.
-      - type: tmpfs
-        target: /workspace/ai-team
-      # Task DB + event log on an inspectable host path.
-      - type: bind
-        source: ${DATA_HOST_DIR}
-        target: /data
+      - {type: bind, source: "${DATA_HOST_DIR}/redis", target: /data}
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 10s, timeout: 3s, retries: 5}
+    logging: *logging
+    deploy: *deploy
+
+  mongo:            # task store: tasks, conversation, runs, events, artifacts, schedules, notifications
+    image: mongo:8.2
+    command: ["--wiredTigerCacheSizeGB", "0.5", "--quiet"]
+    environment:
+      # TCMalloc vs. Linux >= 6.19 rseq (SERVER-121912); harmless on older kernels
+      GLIBC_TUNABLES: glibc.pthread.rseq=0
+    volumes:
+      - {type: bind, source: "${DATA_HOST_DIR}/mongo", target: /data/db}
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1}).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    logging: *logging
+    deploy: *deploy
+
+  # --- components -------------------------------------------------------------------------------
+  scheduler:        # dashboard UI + API, cron, Google Calendar, watchdog  -> status: created
+    <<: *app
+    command: ["python", "-m", "app", "scheduler"]
+    ports:
+      - {target: 8765, published: "${AI_TEAM_PORT:-8765}", mode: host}
+    volumes:      # + gh login for the github-scheduler (PR watcher)
+      - {type: bind, source: "${WORKSPACE_HOST_DIR}", target: /workspace, read_only: true}
+      - {type: tmpfs, target: /workspace/ai-team}
+      - {type: bind, source: "${DATA_HOST_DIR}/github", target: /data/github}
+    deploy: *deploy
+
+  orchestrator:     # consumes tasks, understands them, picks workflow  -> status: queued
+    <<: *app
+    command: ["python", "-m", "app", "orchestrator"]
+    volumes:      # triage may run on a CLI provider too
+      - {type: bind, source: "${WORKSPACE_HOST_DIR}", target: /workspace, read_only: true}
+      - {type: tmpfs, target: /workspace/ai-team}
+      - {type: bind, source: "${DATA_HOST_DIR}/claude-home", target: /data/claude-home}
+      - {type: bind, source: "${DATA_HOST_DIR}/codex", target: /data/codex}
+    deploy: *deploy
+
+  engine:           # runs workflows (LangGraph + Redis checkpoints)    -> status: processing / hold / done
+    <<: *app
+    command: ["python", "-m", "app", "engine"]
+    volumes: *workspace-ro
+    deploy: *deploy
+
+  agent:            # agent pool: full-access tools, skills, browser, LLM providers
+    <<: *app
+    command: ["python", "-m", "app", "agent"]
+    volumes:
+      - {type: bind, source: "${WORKSPACE_HOST_DIR}", target: /workspace}
+      - {type: tmpfs, target: /workspace/ai-team}
+      - {type: bind, source: "${DATA_HOST_DIR}/claude-home", target: /data/claude-home}
+      - {type: bind, source: "${DATA_HOST_DIR}/codex", target: /data/codex}
+      - {type: bind, source: "${DATA_HOST_DIR}/skills", target: /data/skills, read_only: true}
+      - {type: bind, source: "${DATA_HOST_DIR}/github", target: /data/github}
     deploy:
-      replicas: 1
-      restart_policy:
-        condition: on-failure
-      # A new version that doesn't become healthy within `monitor` is rolled back automatically;
-      # deploy.sh detects the rollback and fails. stop-first: the host-mode port can't be shared.
-      update_config:
-        order: stop-first
-        failure_action: rollback
-        monitor: 60s
-      rollback_config:
-        order: stop-first
+      <<: *deploy
+      replicas: ${AI_TEAM_AGENTS:-3}
+
+  notifier:         # stores notifications, pushes to webhook / ntfy
+    <<: *app
+    command: ["python", "-m", "app", "notifier"]
+    deploy: *deploy

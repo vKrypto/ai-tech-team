@@ -1,0 +1,52 @@
+# Notification channels. Every notification is always stored for the dashboard (bell icon); each channel
+# below additionally receives the notifications that pass its filters.
+#
+#   type     implementation in src/app/services/notifier/channels/<type>.py
+#   enabled  auto (default) = on when its required settings are filled in | true | false
+#   events   which notifications: hold (human required), failed, done, component_down, test
+#   levels   action | error | info          projects: only these projects (empty = all)
+#
+# Adding a channel = an entry here (several entries may share a type, e.g. two Slack webhooks).
+# Adding a new kind of channel = one small class (see channels/base.py) + an entry here.
+# ${VAR:-default} is filled from the environment / .env.
+defaults:
+  retries: 3                       # delivery attempts per channel (exponential backoff)
+  events: [hold, failed, done, component_down, test]
+
+channels:
+  webhook:                         # generic JSON POST of the whole notification
+    type: webhook
+    url: ${AI_TEAM_NOTIFY_WEBHOOK_URL:-}
+
+  ntfy:                            # push to phone/desktop via ntfy.sh or self-hosted ntfy
+    type: ntfy
+    url: ${AI_TEAM_NOTIFY_NTFY_URL:-}          # e.g. https://ntfy.sh/my-secret-topic
+    token: ${AI_TEAM_NOTIFY_NTFY_TOKEN:-}
+
+  slack:                           # Slack incoming webhook
+    type: slack
+    url: ${AI_TEAM_NOTIFY_SLACK_WEBHOOK_URL:-}
+
+  telegram:                        # bot: create with @BotFather, chat id from getUpdates
+    type: telegram
+    bot_token: ${AI_TEAM_NOTIFY_TELEGRAM_BOT_TOKEN:-}
+    chat_id: ${AI_TEAM_NOTIFY_TELEGRAM_CHAT_ID:-}
+    events: [hold, failed, component_down, test]
+
+  email:                           # SMTP
+    type: email
+    host: ${AI_TEAM_NOTIFY_SMTP_HOST:-}
+    port: ${AI_TEAM_NOTIFY_SMTP_PORT:-587}
+    username: ${AI_TEAM_NOTIFY_SMTP_USER:-}
+    password: ${AI_TEAM_NOTIFY_SMTP_PASSWORD:-}
+    starttls: ${AI_TEAM_NOTIFY_SMTP_STARTTLS:-true}
+    from: ${AI_TEAM_NOTIFY_EMAIL_FROM:-}
+    to: ${AI_TEAM_NOTIFY_EMAIL_TO:-}            # comma separated
+    events: [hold, failed, test]
+
+  whatsapp:                        # WhatsApp Business Cloud API (Meta)
+    type: whatsapp
+    phone_number_id: ${AI_TEAM_NOTIFY_WHATSAPP_PHONE_NUMBER_ID:-}
+    token: ${AI_TEAM_NOTIFY_WHATSAPP_TOKEN:-}
+    to: ${AI_TEAM_NOTIFY_WHATSAPP_TO:-}         # recipient number(s), comma separated, e.g. 4915112345678
+    events: [hold, failed, test]

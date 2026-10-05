@@ -1,0 +1,22 @@
+# Platform-wide knobs. Infra endpoints and secrets come from env (.env / stack), not from here.
+broker:
+  # Redis Streams, one consumer group per component. Messages are acked only after they are handled,
+  # so a crashed consumer's work is redelivered (to itself on restart, or claimed by a peer when idle).
+  claim_idle_seconds: 600      # pending message with no progress for this long is taken over by a peer
+  max_deliveries: 5            # poison-message guard
+  stream_maxlen: 10000
+engine:
+  max_parallel: 4              # workflows driven at once per engine replica
+  recursion_limit: 150
+agents:
+  concurrency: 1               # jobs per agent replica
+  job_timeout_seconds: 7200
+  max_steps: 60                # tool calls per job (chat-model providers)
+  command_timeout_seconds: 600
+scheduler:
+  cron_tick_seconds: 30
+  monitor_tick_seconds: 30
+  republish_after_seconds: 60  # task stuck in `created` (publish lost) is pushed again
+  stale_service_seconds: 300   # component without heartbeat this long -> notification
+notifications:
+  events: [hold, failed, done]   # which run outcomes notify

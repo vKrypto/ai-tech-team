@@ -1,0 +1,41 @@
+# Which workflow handles which task type (the orchestrator may override with a reason).
+task_types:
+  enquiry: task_execution
+  planning: task_execution
+  review: task_execution
+  testing: task_execution
+  research: research
+  development: coding
+  bugfix: coding
+  docs: coding
+  ops: coding
+  pr_review: pr_review
+  project_management: scrum
+
+workflows:
+  task_execution:
+    description: Generic plan -> execute steps with the right agent -> validate -> replan.
+  research:
+    description: Plan -> search -> analyze -> synthesize, with sources.
+  coding:
+    description: Architect inspects + plans -> senior engineer implements with unit tests -> tester cross-verifies -> team lead reviews (loop until approved).
+  pr_review:
+    description: PR reviewer inspects the PR -> tester verifies it in a temp worktree -> review -> posted on GitHub.
+  scrum:
+    description: Scrum master collects GitHub state -> plans actions -> applies them -> reports.
+
+# Execution policy, per workflow (falls back to `default`).
+policies:
+  default:
+    max_review_rounds: 2       # coding: implement <-> review loops
+    max_replans: 2             # task_execution: replans after a failed validation
+    max_plan_steps: 6
+    max_agent_jobs: 40         # budget per run
+    node_retries: 1            # automatic re-tries of a failing node before asking a human
+    on_error: ask_human        # ask_human (hold the task with retry/abort options) | fail
+    auto_retries: 1            # orchestrator re-runs a run that crashed (not one a human aborted)
+    approval_before: []        # nodes that always need a human go-ahead first, e.g. [implement]
+  coding:
+    max_review_rounds: 3
+  pr_review:
+    post_mode: comment         # comment (always a neutral review comment) | verdict (approve/request changes) | none

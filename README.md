@@ -1,335 +1,443 @@
-# AI Team (POC)
+# AI Team: a multi-agent platform
 
-A dashboard where you type tasks in plain words. Each task is triaged into metadata, queued, then worked
-by a team of agents (planner → senior developer → reviewer) orchestrated with **LangGraph**.
+You describe a task in plain words on the dashboard, or put it in Google Calendar or on a cron
+schedule. The platform works out what kind of task it is and which project it targets, then picks a
+workflow. A pool of agents executes the workflow step by step, with full-access tools, your Claude
+skills and a headless browser. When the agents need a decision, the task waits for you and you get a
+notification. Every run is drawn on the dashboard as a live graph.
 
-Setup: `cp .env.example .env`, then pick a provider and add its key (`mock` works with no key).
-For local dev: `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
-
-## Deploy (Docker Swarm stack)
-
-```bash
-cd ai-team
-./deploy.sh          # builds ai-team:latest, `docker swarm init` if needed, deploys stack `ai_team`
-```
-
-- Single-node swarm on this workstation. The control plane is bound to `127.0.0.1:2377`.
-- Dashboard: `http://<host>:8765` (`AI_TEAM_PORT` to change). Published in host mode, so it's **reachable
-  from the LAN with no auth**.
-- Config comes from `ai-team/.env` (`env_file`). Edit it, then re-run `./deploy.sh`. Comments must be on
-  their own lines; Docker keeps inline `# …` as part of the value.
-- Task DB lives on the host at `ai-team/data/tasks.db`.
-- **Every deploy is verified** before the script reports success:
-  - the new container is running, with no swarm rollback
-  - the Docker healthcheck reports healthy
-  - API and dashboard answer on the port, with the expected backend and the workspace mounted
-  - isolation holds (no git, `.git` masked, `ai-team/` hidden)
-  - the backend has its credentials or gateway
-
-  On any failure it prints the service tasks and the last logs, then exits 1. A version that doesn't
-  start is rolled back by swarm automatically (`update_config.failure_action: rollback`).
-  `DEPLOY_TIMEOUT` (default 180s) bounds the wait.
-- Logs: `docker service logs -f ai_team_app` · Remove: `docker stack rm ai_team`.
-- Every deploy builds a uniquely tagged image so the service actually rolls. Deploys also regenerate
-  `stack.generated.yml`, so **re-run after adding a repo** to get its `.git` masked.
-
-**Isolation in the container.** Bubblewrap can't run inside a container under Docker's AppArmor profile,
-so the container itself is the sandbox:
-- It sees only `~/github` (mounted at `/workspace`). The rest of the host, including `~/.ssh`, is invisible.
-- `/workspace/ai-team` is covered by an empty tmpfs.
-- Every `.git` dir is covered by an empty tmpfs, and every submodule `.git` file by `/dev/null`.
-- The image has no git binary.
-- It runs as UID 1000, so files the coder writes stay owned by you.
-
-### Agent backends
-
-`AI_TEAM_AGENT_BACKEND` in `.env` picks who runs the agents. The CLI backends use **subscriptions,
-not pay-as-you-go API keys**.
-
-| Backend | Who runs each role | Auth (`./deploy.sh` does the login) | Where the credential lives |
-|---|---|---|---|
-| `claude` | Claude Code headless (`claude -p`) | `claude setup-token` (browser), ~1-year inference-only token | `ai-team/data/claude/oauth_token` (mode 600, gitignored) → swarm secret → `/run/secrets/claude_oauth_token` |
-| `codex` | Codex CLI headless (`codex exec --json`) | `codex login --device-auth` (ChatGPT plan), run inside the image | `ai-team/data/codex/` (mode 700, gitignored), mounted at `/data/codex` |
-| `langchain` | LangChain `create_agent` + `tools.py` | `AI_TEAM_PROVIDER` / base URL | `.env` |
-
-- **Checked before every deploy:** the stored credential is tested with one tiny real call ("Reply with
-  exactly: OK") from a throwaway container of the new image. If it's missing or rejected, e.g.
-  `401 OAuth access token is invalid`, the script logs in again, updates the file and re-checks. Login
-  needs an interactive terminal; non-interactive runs stop with a clear error before touching the stack.
-- **Rotate on demand:** `./deploy.sh --relogin`.
-- **The Claude swarm secret is named after the token's hash**, so it's recreated only when the token changes.
-- **Non-interactive seeding:** `CLAUDE_CODE_OAUTH_TOKEN=… ./deploy.sh` saves the given token to the file.
-- **Both CLIs log in separately from the host CLIs.** Copying the host's stored login would break: Claude's
-  access token expires within hours, and both CLIs rotate refresh tokens, so host and container would log
-  each other out.
-- **Codex's credentials can't be a swarm secret.** Swarm secrets are read-only, but Codex rewrites its
-  tokens when it refreshes them.
-
-**Role limits:**
-- **Claude:**
-  - planner and reviewer: `Read,Grep,Glob`
-  - coder: adds `Edit,Write,Bash`
-  - always denied: `git`, web tools, reading `/run/secrets`
-  - models per tier: `AI_TEAM_CLI_MODEL_*`
-- **Codex:**
-  - Its own sandbox needs bubblewrap, which Docker's AppArmor blocks, so it runs with `--dangerously-bypass-approvals-and-sandbox` and the container is the sandbox.
-  - It can't be limited to read-only tools. Planner and reviewer are told they're read-only, and **a step fails if they change any file**.
-  - Tiers set reasoning effort `low`/`medium`/`high`. `AI_TEAM_CODEX_MODEL_*` empty means your plan's default model.
-
-**Shared caveat:** agents run as the same user that can read their credentials (the Claude token file, or
-`/data/codex/auth.json`, plus the task DB in `/data`). A shell command could print them. Treat credentials
-as exposed to whatever the agents read, and re-login if a repo looks hostile.
-
-## Run without Docker (dev)
-
-```bash
-.venv/bin/python -m ai_team   # http://127.0.0.1:8765 — stop the stack first, same port
-```
+Built on **LangGraph** (workflows, durable checkpoints, human-in-the-loop), **Redis** (broker and state),
+**MongoDB** (task store) and a **Docker Swarm** stack.
 
 ## Architecture
 
-### System overview
-
-Everything runs in one container on a single-node Docker Swarm. The only host folder it can write to is
-the root working dir (`~/github`), mounted at `/workspace`.
+### High level
 
 ```mermaid
 flowchart LR
-    user(["You (browser)"])
+  subgraph S["scheduler node"]
+    UI["dashboard-ui-scheduler<br/>(UI + HTTP API)"]
+    CAL["google-calendar-scheduler"]
+    GH["github-scheduler<br/>(PR watcher)"]
+    CRON["cron-scheduler"]
+    MON["watchdog"]
+  end
+  subgraph R["redis (AOF)"]
+    T[["stream ait:tasks"]]
+    W[["stream ait:workflows"]]
+    J[["stream ait:agent-jobs"]]
+    E[["stream ait:engine-events"]]
+    N[["stream ait:notifications"]]
+    CP[("LangGraph checkpoints<br/>job results · flags")]
+  end
+  O["orchestrator<br/>(architestrator)"]
+  EN["workflow engine<br/>(LangGraph runner)"]
+  subgraph A["agent pool (×3) · any replica runs any agent"]
+    A1["senior engineer · architect<br/>team lead · tester"]
+    A2["PR reviewer · scrum master<br/>researcher"]
+  end
+  NO["notifier"]
+  M[("mongodb<br/>tasks · messages · runs<br/>events · artifacts")]
+  P["LLM providers<br/>claude · omniroute · …"]
+  CH["channels<br/>webhook · ntfy · slack ·<br/>telegram · email · whatsapp"]
+  WS[("/workspace<br/>(~/github repos)")]
 
-    subgraph host["Workstation · single-node Docker Swarm"]
-        direction LR
-        subgraph ctr["ai_team_app container (UID 1000, no git binary)"]
-            direction TB
-            dash["Dashboard<br/>dashboard/index.html"]
-            api["FastAPI<br/>api.py"]
-            db[("SQLite<br/>tasks + events")]
-            triage["Triage<br/>triage.py"]
-            orch["Orchestrator<br/>orchestrator.py"]
-            tgraph["Team graph<br/>graph.py · LangGraph"]
-            agents["Role runner<br/>agents.py"]
-
-            subgraph backends["Agent backend · AI_TEAM_AGENT_BACKEND"]
-                direction TB
-                claude["claude<br/>Claude Code: claude -p"]
-                codex["codex<br/>Codex CLI: codex exec --json"]
-                lc["langchain<br/>create_agent + tools.py"]
-            end
-        end
-
-        ws[("/workspace = ~/github<br/>repos: read/write<br/>ai-team/ and .git hidden")]
-        data[("ai-team/data<br/>tasks.db · codex login")]
-        secret[["Swarm secret<br/>Claude token"]]
-    end
-
-    anthropic(["Anthropic<br/>Claude subscription"])
-    openai(["OpenAI<br/>ChatGPT plan"])
-    omni(["OmniRoute gateway<br/>192.168.100.10:10200"])
-
-    user -->|":8765"| dash
-    dash -->|"REST, polls every 2.5s"| api
-    api --> db
-    api -->|"new task"| triage
-    triage -->|"metadata, status queued"| db
-    orch -->|"claim next queued"| db
-    orch --> tgraph --> agents
-    agents --> claude & codex & lc
-    claude --> ws
-    codex --> ws
-    lc --> ws
-    agents -->|"activity log"| db
-    claude -.-> anthropic
-    codex -.-> openai
-    lc -.-> omni
-    secret -.->|"/run/secrets"| claude
-    data -.->|"/data"| db
-    data -.->|"/data/codex"| codex
+  UI & CAL & GH & CRON --> T
+  T --> O --> W --> EN --> J --> A
+  A --> CP --> EN
+  EN --> E --> O --> N --> NO --> CH
+  EN <--> CP
+  A --> P
+  A <--> WS
+  A <--> GHUB["GitHub (gh)"]
+  S & O & EN & A & NO <--> M
 ```
 
-### Task lifecycle
+| Node (swarm service) | Replicas | Role | Task status it sets |
+|---|---|---|---|
+| `scheduler` | 1 | Dashboard and HTTP API (dashboard-ui-scheduler), cron schedules, Google Calendar polling, GitHub PR watcher and a watchdog. Creates tasks and pushes them to the broker. Also handles follow-ups, retries, cancels, human answers and node re-runs. | `created` |
+| `orchestrator` | 1 | Consumes tasks and works out the task type, project (existing or new), workflow and model tier. Hands the run to the engine. Watches run outcomes: notifications, plus auto-retry of crashed runs. | `queued` |
+| `engine` | 1 | Runs LangGraph workflows. Each step becomes an agent job. Handles state, retries, errors, human holds, node re-execution and crash resume. | `processing`, `hold:human_required`, `done`, `failed` |
+| `agent` | 3 | Executes jobs in full-access mode: files, shell, git, curl/fetch, web search, Playwright browser, SQLite and skills. Routes to LLM providers with fallback. | — |
+| `notifier` | 1 | Stores every notification and forwards it to the enabled channels. | — |
+| `redis` | 1 | Broker (Redis Streams with consumer groups), workflow checkpoints, job results, cancel flags, heartbeats. AOF with fsync every second, in `data/redis`. | — |
+| `mongo` | 1 | Task store, in `data/mongo`. | — |
 
-```mermaid
-stateDiagram-v2
-    [*] --> triaging: POST /api/tasks
-    triaging --> queued: triage sets project, type, agents, tier
-    triaging --> failed: triage error
-    queued --> running: orchestrator claims it, up to AI_TEAM_MAX_PARALLEL at once
-    running --> done: workflow finished, reviewer approved if there was code
-    running --> failed: agent error, or not approved after max review rounds
-    triaging --> cancelled: Cancel
-    queued --> cancelled: Cancel
-    running --> cancelled: Cancel, takes effect at the next agent event
-    done --> triaging: Retry, which re-triages
-    failed --> triaging: Retry
-    cancelled --> triaging: Retry
-```
+All app services run the same image with a different command (`python -m app <service>`).
 
-### Team graph (LangGraph)
-
-Triage picks the `workflow`, and routing skips the agents a task doesn't need. A review-only task goes
-straight to the reviewer, and a question goes only to the planner.
-
-```mermaid
-flowchart LR
-    S((START)) --> E{"first agent<br/>in workflow"}
-    E -->|planner| P["Planner<br/>read-only<br/>plan + acceptance criteria,<br/>or answers the question"]
-    E -->|coder| C
-    E -->|reviewer| R
-    P --> AP{"coder in<br/>workflow?"}
-    AP -->|yes| C["Developer<br/>read/write<br/>implements, runs tests,<br/>records changed files"]
-    AP -->|"no, reviewer is"| R
-    AP -->|neither| X((END))
-    C --> AC{"reviewer in<br/>workflow?"}
-    AC -->|yes| R["Reviewer<br/>read-only<br/>reads changed files,<br/>gives a VERDICT"]
-    AC -->|no| X
-    R --> V{"APPROVED?"}
-    V -->|yes| X
-    V -->|"CHANGES_REQUESTED<br/>and rounds below max"| C
-    V -->|"rounds used up"| X
-```
-
-### One agent step
-
-The model never touches the disk. It asks for a tool, and the tool runs inside the container. Whatever a
-tool reads is sent to the provider as text.
+### Data flow of a task
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    participant G as Team graph
-    participant R as Role runner
-    participant B as CLI or LangChain loop
-    participant M as LLM provider
-    participant W as /workspace
+  autonumber
+  actor U as You / Calendar / Cron
+  participant S as scheduler
+  participant R as redis streams
+  participant O as orchestrator
+  participant E as engine
+  participant A as agent pool
+  participant M as mongo
+  participant N as notifier
 
-    G->>R: run role with brief (task, plan, review feedback)
-    R->>B: start with role prompt, allowed tools, project dir
-    loop until the model gives a final answer
-        B->>M: conversation so far + tool definitions
-        M-->>B: tool call, e.g. Read app/main.py
-        B->>W: run tool (git denied, .git and ai-team hidden)
-        W-->>B: result
-        B-->>R: stream event (message, tool call, file change)
-        R->>R: append to activity log, check for Cancel
-    end
-    M-->>B: final answer
-    B-->>R: result + changed files
-    R-->>G: plan, summary or VERDICT
+  U->>S: new task (UI / API / calendar event / cron)
+  S->>M: store task (status created)
+  S->>R: XADD ait:tasks {new}
+  R->>O: XREADGROUP (orchestrator)
+  O->>O: understand: type, project (existing/new), workflow, tier (LLM, structured)
+  O->>M: metadata, status queued
+  O->>R: XADD ait:workflows {start}
+  R->>E: XREADGROUP (engine)
+  E->>M: run + graph, status processing
+  loop every workflow step (node)
+    E->>R: XADD ait:agent-jobs {node, role, brief, sessions}
+    R->>A: XREADGROUP (agents, any free replica)
+    A->>A: provider chain (claude → omniroute → …), tools, skills, browser
+    A->>M: activity events (tool calls, results, messages)
+    A->>R: job result
+    E->>E: checkpoint state (redis), route to next node
+  end
+  alt agent needs a decision / step failed
+    E->>M: status hold:human_required (problem + options)
+    E->>R: engine-event hold
+    O->>N: notification (task, project, problem, options)
+    N-->>U: dashboard bell + telegram / email / …
+    U->>S: answer (option + text)
+    S->>R: XADD ait:workflows {resume}
+    E->>E: resume the same node, same agent session
+  end
+  E->>M: final answer, status done
+  E->>R: engine-event done
+  O->>N: notification (done)
 ```
 
-### Deploy flow (`./deploy.sh`)
+### Task status lifecycle
 
 ```mermaid
-flowchart TD
-    A["./deploy.sh [--relogin]"] --> B["read .env<br/>root working dir, backend"]
-    B --> C{"swarm active?"}
-    C -->|yes| F["docker build<br/>unique image tag"]
-    C -->|no| C1["docker swarm init<br/>bound to 127.0.0.1"] --> F
-    F --> G{"backend"}
-    G -->|"claude or codex"| K{"stored credential works?<br/>one tiny real call"}
-    K -->|"no, or --relogin"| L["log in again<br/>claude setup-token, or<br/>codex login --device-auth<br/>update data/claude or data/codex"] --> K
-    K -->|yes| M["claude only: swarm secret<br/>named by token hash"] --> H
-    G -->|langchain| H["generate stack.generated.yml<br/>tmpfs over every .git<br/>/dev/null over submodule .git files<br/>attach token secret"]
-    H --> I["docker stack deploy ai_team<br/>stack.yml + stack.generated.yml"]
-    I --> V1{"new container running?<br/>no swarm rollback"}
-    V1 -->|yes| V2{"healthcheck<br/>healthy?"}
-    V2 -->|yes| V3{"API + dashboard on :8765<br/>expected backend,<br/>workspace mounted?"}
-    V3 -->|yes| V4{"isolation: no git,<br/>.git masked,<br/>ai-team hidden?"}
-    V4 -->|yes| V5{"backend credentials<br/>reached the container?"}
-    V5 -->|yes| J["prune old token secrets<br/>✓ deployed and verified"]
-    V1 -->|no| X["✗ print tasks + logs<br/>exit 1"]
-    V2 -->|no| X
-    V3 -->|no| X
-    V4 -->|no| X
-    V5 -->|no| X
+stateDiagram-v2
+  [*] --> created: scheduler
+  created --> queued: orchestrator routed it
+  queued --> processing: engine picked it up
+  processing --> hold: agent needs a human / step failed / approval
+  hold --> queued: human answered
+  processing --> done
+  processing --> failed: aborted, budget, crash after auto-retries
+  created --> cancelled
+  queued --> cancelled
+  processing --> cancelled
+  hold --> cancelled
+  done --> created: follow-up (new turn)
+  failed --> created: retry (new attempt) / follow-up
+  cancelled --> created: retry
+  done --> queued: re-run from a node
+  failed --> queued: re-run from a node
+  state "hold:human_required" as hold
 ```
 
-| Module | Responsibility |
+## Workflows
+
+Defined in `src/app/workflows/` (LangGraph). The orchestrator picks one per turn; `configs/workflows.yaml`
+holds the defaults per task type and the execution policies.
+
+| Workflow | Used for | Steps (agent) |
+|---|---|---|
+| `coding` | development, bugfix, docs, ops | inspect_repo, plan_changes (architect) → implement + unit tests (senior engineer) → test: cross-verify the feature for real (tester) → review (team lead) ↺ implement until approved (max rounds) → finalize |
+| `research` | research / R&D | plan → search → analyze → synthesize (researcher) → finalize |
+| `pr_review` | review a GitHub PR | inspect_pr (PR reviewer) → verify_pr in a temp worktree (tester) → review_pr (PR reviewer) → post_review on GitHub (PR reviewer; `post_mode`) → finalize |
+| `scrum` | GitHub issues, boards, milestones, sprint/standup reports | collect_status → plan_actions → apply_actions → report (scrum master) → finalize |
+| `task_execution` | enquiry, planning, code review, testing, mixed | receive → understand, plan_task (architect) → select_agent → execute_agent (any agent) \| research \| coding \| validation (tester → team lead) → validate_result (team lead) → next step / replan → complete (architect) → finalize |
+
+Every graph starts with validate_task → load_context (conversation, per-project memory, project layout).
+
+Every graph also has:
+- **approval**: the human-in-the-loop gate. An agent ends its answer with
+  `NEEDS_HUMAN: {"problem": ..., "options": [...]}`. The run pauses with a LangGraph `interrupt`,
+  checkpointed in Redis. Your answer resumes the **same node and the same agent session**.
+- **handle_error**: a step that still fails after its automatic retries puts the task on hold with
+  *retry* / *abort* options (`on_error: ask_human`), or fails it outright (`on_error: fail`).
+- **approval_before**: a policy that makes chosen nodes, e.g. `implement`, wait for your go-ahead first.
+
+**Re-execute a node:** click a step in the graph, then **Re-run from here**. The engine forks the run
+from the checkpoint just before that step, so earlier steps are not repeated.
+
+**Continue the chat:** a finished task takes follow-ups. Each one is a new *turn*: the orchestrator
+routes it again (it may switch workflow, e.g. research → coding), and agents resume their own sessions,
+so they remember the earlier turns.
+
+## Durability and recovery
+
+| Failure | What happens |
 |---|---|
-| `config.py` | Settings from env / `.env` (`AI_TEAM_*`) |
-| `db.py` | Task + event persistence (SQLite, `data/tasks.db`) |
-| `llm.py` | Model factory (`init_chat_model`), tier → model |
-| `triage.py` | Task → metadata (LLM; keyword heuristic under `mock`) |
-| `agents.py` | Role definitions + role runner; dispatches to the configured backend, streams activity into the event log |
-| `cli_agent.py` | Claude Code backend (`claude -p`, per-role tool limits, token from the swarm secret) |
-| `codex_cli.py` | Codex CLI backend (`codex exec --json`, ChatGPT login state, read-only guard) |
-| `tools.py` | Sandboxed workspace tools for the `langchain` backend |
-| `graph.py` | LangGraph workflow and routing |
-| `orchestrator.py` | Queue worker, status transitions, cancellation, crash recovery; runs each turn on the task's checkpointed thread |
-| `memory.py` | LangGraph SQLite checkpointer (`data/checkpoints.db`): team-graph state and agent threads per task |
-| `api.py` | REST API + serves the dashboard |
+| Engine crashes mid-run | Its `start`/`resume` message is still pending. On restart (same consumer name `ai_team_engine.1`) it re-reads it, finds the run's checkpoint and continues from the last finished node. A job already dispatched is not sent again (job ids are idempotent). The engine waits for the job's result. |
+| Agent crashes mid-job | The job stays pending. The restarted replica re-reads its own pending jobs, and a job left by a replica that never returns is claimed by a peer after `broker.claim_idle_seconds`. Live jobs keep their claim fresh, so peers never steal them. |
+| Orchestrator / scheduler restart | Pending messages are redelivered. A task whose broker message was lost (stuck in `created`) is re-published by the watchdog. |
+| Whole host reboots | Redis AOF and Mongo files live in `data/`; swarm restarts everything; runs resume as above. |
+| Provider down / rate-limited | The job falls back to the next provider in the role's chain. |
+| Step keeps failing | Node retries, then hold with retry/abort. A run that *crashed* is auto-retried by the orchestrator (`auto_retries`). |
+| A component goes silent | The watchdog sends a `component_down` notification. |
 
-### Continue chat (follow-ups)
+Checked locally: `kill -9` of the whole platform in the middle of a `search` step. After restart the
+run continued from `search`, `plan` was not repeated, and the run finished.
 
-A task is a conversation. Once it's done, failed or cancelled, the dashboard's **Continue this task** box
-(or `POST /api/tasks/{id}/messages {"text": …}`) queues another turn on the same task, like resuming a
-`claude` CLI session. The same team picks it up with its memory:
+## LLM providers
 
-```mermaid
-flowchart LR
-    U["follow-up text"] --> Q["turn N+1 queued<br/>messages table"]
-    Q --> O["orchestrator<br/>graph.invoke on thread = task id"]
-    O <-->|"restore / save"| CP[("data/checkpoints.db<br/>LangGraph SqliteSaver")]
-    O --> A["each agent resumes its own session"]
-    A --> C1["claude: --resume &lt;session-id&gt;<br/>transcripts in data/claude-home"]
-    A --> C2["codex: exec resume &lt;thread-id&gt;<br/>transcripts in data/codex"]
-    A --> C3["langchain: checkpointer thread<br/>&lt;task&gt;:&lt;role&gt;"]
-    O --> R["outcome appended to the<br/>conversation as turn N+1"]
+Named providers in `configs/models.yaml`, switched on with `AI_TEAM_PROVIDERS` in `.env`:
+
+| Provider | Type | Agent loop | Auth |
+|---|---|---|---|
+| `claude` | `claude_code` | Claude Code CLI (native tools, skills, Playwright MCP, `--resume`) | subscription token from `claude setup-token`; `./deploy.sh` does the login → swarm secret |
+| `omniroute` | `openai` | LangChain agent with our tools | self-hosted OpenAI-compatible gateway (`AI_TEAM_OMNIROUTE_URL`) |
+| `codex` | `codex` | Codex CLI | ChatGPT device login, run by `./deploy.sh` |
+| `anthropic` | `anthropic` | LangChain | `ANTHROPIC_API_KEY` |
+| `mock` | `mock` | fake, deterministic | none (runs the whole platform for free) |
+
+- **Routing.** Each role has an ordered chain. The first enabled provider is used, the next ones are
+  fallbacks. Defaults: `claude → omniroute → …` for agents, `omniroute → claude → …` for the
+  orchestrator (cheap triage).
+- **Tiers.** `fast` / `balanced` / `deep` map to each provider's models. A role's tier in
+  `configs/agents.yaml` is a floor: the task's tier can raise it, never lower it.
+- **Sessions** are kept per role *and* provider. They are shared by all agent replicas
+  (`data/claude-home`, `data/codex`, Redis checkpointer), so the next step resumes the conversation on
+  whichever replica gets it.
+- **Adding a provider** that speaks an existing type, e.g. another OpenAI-compatible gateway, is one
+  YAML entry. A new type is one class in `src/app/llm/providers/` registered in `llm/factory.py`
+  (Google, Ollama and Bedrock types are already there).
+
+## Agents, tools and skills
+
+The pre-built agents: persona in `src/app/agents/<role>/prompt.py`; title, tier and tools in
+`configs/agents.yaml`. The System tab shows the roster.
+
+| Agent | Role | Owns |
+|---|---|---|
+| **Senior Software Engineer** (`senior_engineer`) | Implements features and fixes, writes and runs unit tests, keeps the build green | coding/implement, task steps |
+| **Platform Architect** (`architect`) | Task planner: explores, designs, breaks work into steps with acceptance criteria | coding/inspect_repo + plan_changes, task_execution/understand + plan + replan + complete |
+| **Team Lead** (`team_lead`) | Task reviewer: judges the work against request and criteria, approves or sends it back | coding/review, task_execution/validate_result, validation/judge |
+| **Tester** (`tester`) | Cross-verifies the feature works as expected: runs the app, API calls, browser, suites (doesn't fix) | coding/test, validation/run_checks, pr_review/verify_pr |
+| **PR Reviewer** (`pr_reviewer`) | Reviews GitHub PRs (diff, context, CI) and posts the review | pr_review/* |
+| **Scrum Master** (`scrum_master`) | Maintains GitHub projects: issues, labels, milestones, boards, sprint/standup reports | scrum/* |
+| Researcher (`researcher`) | Web/docs/browser research with sources | research/*, task steps |
+| Orchestrator (`orchestrator`) | Routes tasks (structured output only) | orchestrator service |
+
+**Adding an agent:**
+1. Create `src/app/agents/<role>/` with `prompt.py` and `agent.py`.
+2. Register it in `agents/registry.py` and add it to `configs/agents.yaml`.
+3. Use it from a workflow node with `run_agent(state, node, "<role>", instruction)`. The task_execution
+   planner can also assign steps to it once it is listed in `prompts/templates/plan_steps.md`.
+
+All roles run in **full-access mode** inside the agent containers:
+
+| Tool group | Tools (chat-model providers) | CLI providers |
+|---|---|---|
+| filesystem | `list_dir`, `read_file`, `write_file`, `edit_file`, `search` | native |
+| shell | `run_command` (bash: tests, builds, curl, package managers…) | native |
+| git | `git_status`, `git_diff`, `git_commit` (push only with `AI_TEAM_GIT_PUSH_ENABLED`) | native |
+| github | `gh` (any GitHub CLI command: PRs, reviews, issues, projects) | `gh` via shell |
+| web | `web_search` (DuckDuckGo or SearXNG), `http_fetch` | native |
+| browser | `browser` (headless Chromium via Playwright: navigate, click, fill, eval, screenshot) | Playwright MCP |
+| database | `sql_query`, `sql_schema` (SQLite files) | via shell |
+| skills | `list_skills`, `load_skill` | native (`CLAUDE_CONFIG_DIR/skills`) |
+
+**Skills.** `./deploy.sh` copies all your Claude skills (`~/.claude/skills`, including synced ones, and
+every plugin's skills) into `data/skills`. That is 51 skills today; they are re-synced on each deploy.
+
+**Hard lines, even in full-access mode:**
+- the `ai-team/` folder (tmpfs over `/workspace/ai-team`) and `/run/secrets` are off-limits
+- host-wrecking commands (`rm -rf /`, `mkfs`, `sudo`, …) are refused
+- secrets are redacted from everything stored or shown
+
+Agents see only the workspace (`~/github` → `/workspace`) and run as your UID.
+
+## GitHub
+
+1. **Enable it:** set `AI_TEAM_GITHUB_ENABLED=true` in `.env.prod` and run `./deploy.sh` from a terminal.
+   It logs the `gh` CLI in with the device flow (scopes `repo, read:org, project, workflow`) and stores
+   the login in `data/github`. Non-interactive: `GH_TOKEN=... ./deploy.sh`.
+2. **Who uses it:** agents use `gh` for PR reviews, issues and projects, and the scheduler uses it to
+   watch repos.
+3. **PR watcher (github-scheduler):** list repos in `AI_TEAM_GITHUB_WATCH_REPOS` (`owner/repo,…`).
+   - Each new non-draft PR becomes a `pr_review` task: only PRs requesting your review, or every open
+     PR with `AI_TEAM_GITHUB_WATCH_FILTER=all`.
+   - A new push to a PR gets reviewed again.
+   - If a workspace folder has the repo's name, it is used as the project.
+4. **Posting reviews:** `policies.pr_review.post_mode` in `configs/workflows.yaml`:
+   - `comment` (default): a neutral review comment that states the verdict
+   - `verdict`: actually approve or request changes
+   - `none`: report only, don't post
+5. **Pushing is off by default.** With `AI_TEAM_GIT_PUSH_ENABLED=true`, agents may push feature branches
+   and open PRs when a task asks, but never to the default branch.
+6. **Scrum master safety:** it never deletes issues, repos, branches or projects; it closes with a
+   reason instead. Add `apply_actions` to `approval_before` if you want to approve its changes first.
+
+## Notifications
+
+The notifier stores every notification (the dashboard bell) and forwards it to each enabled channel in
+`configs/notifications.yaml` whose filters accept it:
+
+| Event | When |
+|---|---|
+| `hold` | Human required. Includes task, project, step, problem and options, plus a dashboard link. |
+| `failed` | Task failed. |
+| `done` | Task finished. |
+| `component_down` | A whole component kind stopped heartbeating. |
+| `test` | System tab → *Send test notification*. |
+
+Channels shipped: **webhook** (JSON), **ntfy**, **Slack**, **Telegram**, **email (SMTP)**, **WhatsApp**
+(Meta Cloud API).
+- **Turning one on:** a channel switches on when its settings in `.env` are filled in
+  (`enabled: auto`). Each channel has its own `events` / `levels` / `projects` filters and `retries`.
+- **Delivery results:** recorded per channel, shown in the bell and on the task's activity.
+- **Adding a channel** (Discord, Teams, SMS…): one `Channel` subclass in
+  `src/app/services/notifier/channels/`, registered in `channels/registry.py`, plus a YAML entry.
+
+## Logging and observability
+
+Every step is logged twice: to the task's **Activity** tab (Mongo `events`, filterable) and as a line in
+the service logs (`docker service logs -f ai_team_engine`, …):
+
+```text
+task=12 run=12-t1-a1 orchestrator [status] understood by omniroute: bugfix · project shop · workflow coding · balanced — …
+task=12 run=12-t1-a1 engine/implement [status] ▶ step `implement` started
+task=12 run=12-t1-a1 coder@ai_team_agent.2 [status] coder on omniroute (auto/best-coding, balanced)
+task=12 run=12-t1-a1 coder@ai_team_agent.2 [tool] run_command(command='pytest -q', cwd='.')
+task=12 run=12-t1-a1 coder@ai_team_agent.2 [tool_result] run_command → 812 chars in 4.1s: exit=0
+task=12 run=12-t1-a1 engine/implement [status] job 12-t1-a1:e0:implement:2:0 ok after 95.2s — coder on ai_team_agent.2 via omniroute/auto/best-coding, 3 file(s) changed
+task=12 run=12-t1-a1 engine/implement [status] ✓ step `implement` done in 95.3s
+task=12 run=- notifier [status] notification [done] 'Done · task #12: …': dashboard, sent via telegram
 ```
 
-- **What carries over** in the graph checkpoint (thread = task id): plan, result, review, and each agent's
-  session id. **Reset each turn:** review rounds, approval and the changed-files list.
-- **Every follow-up brief** has the original task, a compact history of earlier turns and the new request.
-  An agent that has no session yet (e.g. tasks from before this feature) still has the full context.
-- **The follow-up reuses the task's triage** (project, agents, tier); it isn't re-triaged.
-- **Retry** re-runs only the latest turn. Retrying turn 1 starts over: re-triage, and all memory for the
-  task is forgotten.
-- **Storage:** everything is local in `ai-team/data/` (SQLite + CLI transcript folders, gitignored).
-  Redis could replace the SQLite checkpointer later (`langgraph-checkpoint-redis`), e.g. for several
-  orchestrator replicas.
+- **Runs:** node status, attempts and timing per run (`runs`); each node's full output is in
+  `artifacts` (click a node in the graph).
+- **Components:** heartbeats every 10s (System tab, `/api/meta`).
+- **Metrics:** counters at `/api/metrics` (Prometheus text). Set `LANGSMITH_*` env vars for LangSmith
+  traces.
 
-### Re-verify (is it actually done?)
+## Environments
 
-**Verify** on a finished task, or `POST /api/tasks/{id}/verify`, queues an independent check of the
-**current code** against **every request in the task's conversation**:
+| | Production | Local development |
+|---|---|---|
+| Runs on | Proxmox `docker-vm.local.internal` (192.168.100.10), single-node Docker Swarm, port block 10800–10899 | your machine, `docker compose` |
+| File | `stack.yml` (+ generated `stack.generated.yml` for secrets) | `docker-compose.yml` |
+| Config | `.env.prod` | `.env` |
+| Start | `./deploy.sh` | `docker compose up --build` / `docker compose watch` |
+| Dashboard | http://ai-team.local.internal (direct: http://192.168.100.10:10800) | http://localhost:8765 |
+| Data | `/data/stacks/ai-team/data` on docker-vm | `./data/dev` (+ shared logins in `./data`) |
+| Agents' repos | `/data/stacks/ai-team/workspace` on docker-vm | `AI_TEAM_WORKSPACE_ROOT` (e.g. `~/github`) |
+| Providers | from `.env.prod` | `mock` by default (free); switch in `.env` |
 
-- **A separate `verifier` agent**, started fresh each time (no shared session, so it doesn't inherit the team's
-  assumptions). It gets all user requests, the files changed across all turns, and the developer's last
-  summary as *claims to check*.
-- **It reads code and runs tests/builds but must not edit:**
-  - claude: `Read,Grep,Glob,Bash`, with git denied
-  - codex: the step fails if it edits files
-  - langchain: read tools + `run_command`
-- **The report:** a checklist (`[x]` met / `[~]` partly / `[ ]` not met) with evidence, the gaps as concrete
-  fixes, and a final `VERIFICATION: DONE | PARTIAL | NOT_DONE`.
-- **The verdict is stored next to the task** (`verify_state`, `verification`, `verified_at`), shown as a badge,
-  and added to the conversation. It **never changes the task's status**.
-- **On PARTIAL or NOT_DONE,** **Continue with gaps** prefills a follow-up asking the team to fix them. The
-  verifier's report is part of the conversation history the team sees.
-- **It runs through the orchestrator queue** (counts against `AI_TEAM_MAX_PARALLEL`), never while the task
-  itself is running. A new turn or retry clears the earlier verdict as stale.
+Both env files are gitignored; `.env.example` documents every setting.
 
-### Model selection
-Triage sets `model_tier` (`fast` / `balanced` / `deep`). It maps to `AI_TEAM_MODEL_FAST/BALANCED/DEEP`.
-The provider (`anthropic`, `openai`, `ollama`, …) is global, via `AI_TEAM_PROVIDER`.
+### Production: `./deploy.sh` → docker stack on Proxmox
 
-### Boundaries
-- **Filesystem:** Agents only see `AI_TEAM_WORKSPACE_ROOT` (default: the folder containing `ai-team/`).
-  Each top-level folder there is a project. Paths outside it, `ai-team/` itself and `.env*` files are denied.
-- **No git at all:** There is no git tool, any command mentioning git is refused, and `.git/` folders
-  can't be read. The coder's write tools record changed files, and that list is what the reviewer gets.
-- **Shell (dev mode):** `run_command` runs under **bubblewrap**. The whole filesystem is read-only except the workspace.
-  `ai-team/` and every `.git/` are hidden, and the git binary is masked. Network stays open so agents can
-  talk to local services. Without `bwrap` it falls back to a plain shell (only the regex guard applies).
+```bash
+docker context create docker-vm --docker host=ssh://docker-vm   # one-time (already done here)
+./deploy.sh                    # uses .env.prod
+./deploy.sh --relogin          # rotate the Claude token / redo the Codex + GitHub device logins
+./deploy.sh --smoke            # plus one small real task end to end
+./deploy.sh --env other.env    # another target, e.g. a local swarm (AI_TEAM_DEPLOY_CONTEXT=default)
+```
 
-### Known POC limits
-- In dev mode `run_command` can still *read* files outside the workspace (e.g. `~/.ssh`); the stack doesn't have this gap.
-- The dashboard/API has no auth, and the stack publishes it on the LAN.
-- Polling instead of SSE/websockets; a single process holds the API, triage and orchestrator.
-- A task interrupted by a restart re-runs its current turn from the start (earlier turns are kept).
-- Cancelling a running task takes effect at the next agent step, not instantly.
+What it does, all through the Docker context over SSH:
+1. **Builds the image** on the docker-vm engine, so no registry is needed. With `AI_TEAM_REGISTRY`, it
+   builds locally, pushes, and the target pulls (`--resolve-image always`) instead.
+2. **Prepares the target:** creates the data and workspace dirs there and ships your Claude skills
+   (`scripts/sync_skills.sh`) to the target's `data/skills`.
+3. **Checks every enabled provider and GitHub on the target** with one tiny real call. Logins run there
+   too: Claude token → swarm secret, Codex/GitHub device login → target `data/codex`, `data/github`.
+   The Claude token is kept locally in `data/deploy/<context>/`.
+4. **Runs `docker stack deploy --prune` and verifies the deploy:**
+   - each service is healthy on the new image, with no swarm rollback
+   - Redis AOF is on and Mongo is writing to the data dir
+   - all components are heartbeating and the expected providers are enabled
+   - the dashboard answers on `AI_TEAM_DEPLOY_HOST:AI_TEAM_PORT`
+   - agents are isolated and have their toolbox and skills
 
-## Next steps (toward the full "company")
-More roles (QA/tester, DevOps, security reviewer) as new graph nodes. A supervisor node that routes
-dynamically instead of a fixed workflow. LangGraph checkpointer (SQLite) for resume and human-in-the-loop
-approval. Parallel tasks with per-project locking. Per-role model overrides. SSE live log.
+   On failure it prints each service's tasks and logs, then exits 1. A version that doesn't start is
+   rolled back by swarm. `DEPLOY_TIMEOUT` defaults to 300s.
+
+Notes:
+- **The workspace on the server starts empty.** Clone the repos the team should work on into
+  `/data/stacks/ai-team/workspace`, or ask the team to: with GitHub enabled the agents can
+  `gh repo clone`.
+- **Friendly name.** `ai-team.local.internal` resolves like every other `*.local.internal` name:
+  Pi-hole (`local-server/reception/pihole/local-dns.list`) → Nginx Proxy Manager on docker-vm (proxy host
+  `ai-team.local.internal` → `192.168.100.10:10800`) → the scheduler. The stack is also listed on the
+  `local.internal` homepage, in `local-server/proxmox/ports.md`, and has an Uptime Kuma monitor (AutoKuma).
+- **No auth on the dashboard.** It is reachable from the LAN without auth, on the name and on :10800.
+- **Internal traffic skips the proxy.** Containers call OmniRoute at `192.168.100.10:10200`, not
+  `omniroute.local.internal`, because NPM's 90s proxy timeout would cut long LLM calls.
+- **Operations:**
+  - Logs: `docker --context docker-vm service logs -f ai_team_<service>`
+  - Scale agents: `AI_TEAM_AGENTS`
+  - Remove: `docker --context docker-vm stack rm ai_team` (data stays)
+- **History from v1:** `scripts/seed.py --from-sqlite` imports the old SQLite tasks.
+- **Logins are first-time interactive.** Claude, Codex and GitHub logins need an interactive terminal the
+  first time. Non-interactive alternatives: `CLAUDE_CODE_OAUTH_TOKEN=… ./deploy.sh` and
+  `GH_TOKEN=… ./deploy.sh`.
+
+**Google Calendar:**
+1. Google Calendar → *Settings* → your calendar → copy the *Secret address in iCal format* into
+   `AI_TEAM_GCAL_ICS_URLS`.
+2. Events whose title contains `[ai]` become tasks when they start.
+
+**Cron:** Schedules tab (UTC cron expressions).
+
+### Local development: docker compose
+
+```bash
+cp .env.example .env                 # once; AI_TEAM_PROVIDERS=mock costs nothing
+scripts/sync_skills.sh data/skills   # optional: your Claude skills for the agents
+docker compose up --build            # whole platform: redis, mongo, 5 components, 2 agents
+docker compose watch                 # same, plus live sync of src/ and configs/ (restarts the services)
+```
+
+- Dashboard on http://localhost:8765. Redis is on `127.0.0.1:16379` and Mongo on `127.0.0.1:17017`
+  for inspection.
+- Dev data lives in `./data/dev`. Provider and GitHub logins are shared with `./data` (`claude`,
+  `codex`, `github`).
+- Singletons have fixed hostnames, so their pending work resumes after a restart. Agent replicas
+  don't: a restarted agent's unfinished job is taken over after `broker.claim_idle_seconds`.
+
+## Develop and test
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
+.venv/bin/pytest                                   # unit + in-process workflow tests (mock provider)
+AI_TEAM_E2E_URL=http://localhost:8765 .venv/bin/pytest tests/integration   # e2e against a mock environment
+python scripts/evaluate.py                         # orchestrator routing accuracy on real providers
+python scripts/run_local.py                        # alternative: everything in one process, no compose
+```
+
+The mock provider takes markers in the task text to drive scenarios: `[ask]` (human hold), `[fail]`
+(step failure), `[slow]`, `[code]` (task_execution plans a coding sub-workflow).
+
+## Layout
+
+```text
+configs/            app.yaml · models.yaml (providers, routing) · agents.yaml (roster) · workflows.yaml · notifications.yaml
+src/app/
+  main.py           python -m app scheduler|orchestrator|engine|agent|notifier|all|health
+  domain/           task, run, stream envelopes, statuses
+  services/         one package per node: scheduler/ (api, cron, google_calendar, github, monitor) · orchestrator/
+                    engine/ · agent/ · notifier/ (channels/)
+  workflows/        common/ (state, tracking, approval, recovery, nodes) · task_execution/ · research/ · coding/
+                    pr_review/ · scrum/
+  agents/           base (provider chain, NEEDS_HUMAN) · architect/ · senior_engineer/ · team_lead/ · tester/
+                    pr_reviewer/ · scrum_master/ · researcher/ · orchestrator/
+  llm/              providers/ (claude_code, codex, openai, anthropic, google, ollama, bedrock, mock) · router · fallback
+  tools/            filesystem · shell · git · github · web · browser · database · skills
+  orchestration/    broker (Redis Streams) · policies · selectors · cron maths
+  runtime/          graph_runner (engine core) · executor (jobs) · cancellation · retry
+  persistence/      mongo/redis clients · task & run repositories · artifacts · checkpoints
+  memory/           short-term (conversation) · long-term (per-project notes) · context builder
+  guardrails/       input · output redaction · tool permissions · budget
+  observability/    events (activity log) · logging · metrics · tracing
+  api/              FastAPI routes + static dashboard
+tests/              unit/ · workflows/ · integration/ (e2e) · evals/
+stack.yml           production swarm stack (deploy.sh adds stack.generated.yml for secrets)
+docker-compose.yml  local development
+scripts/            run_local.py · seed.py · evaluate.py · sync_skills.sh
+```
+
+**Caveat:** in full-access mode agents can run any command in the workspace and make local git commits.
+They run as the same user that can read their provider credentials (the Claude token secret,
+`/data/codex`). Output is redacted, but treat credentials as exposed to anything the agents run.
