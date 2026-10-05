@@ -157,6 +157,34 @@
   .io { border-top: 1px solid var(--line); padding: 8px 10px; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 6px 8px; }
   .io .lbl { font: 600 10.5px ui-monospace, monospace; color: var(--muted); padding-top: 9px; letter-spacing: .05em; }
   .io pre { margin: 0; max-height: 320px; font-size: 12px; } .io pre.bad { color: var(--failed); }
+  /* activity log */
+  .log { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 0; }
+  .lrow { display: grid; grid-template-columns: 70px auto minmax(0, 1fr); gap: 4px 10px; align-items: start; padding: 7px 12px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); font-size: 13px; }
+  .lrow:last-child { border-bottom: 0; }
+  .lrow time { font: 11.5px ui-monospace, monospace; color: var(--muted); padding-top: 2px; }
+  .lrow .ltext { min-width: 0; overflow-wrap: anywhere; }
+  .lrow .ltext .md { display: inline; } .lrow .licon { margin-right: 4px; }
+  .lrow.k-status .ltext { color: var(--muted); } .lrow.k-error .ltext { color: var(--failed); } .lrow.k-human .ltext { color: var(--hold); font-weight: 600; }
+  .lrow.expandable { cursor: pointer; } .lrow.expandable:hover { background: var(--panel2); }
+  .lrow .lmore { display: none; margin: 8px 0 2px; max-height: 360px; font-size: 12px; }
+  .lrow.open .lmore { display: block; } .lrow .lmore.bad { color: var(--failed); }
+  .lrow.clamp:not(.open) .ltext { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .lrow .tdot { display: inline-block; margin-right: 6px; vertical-align: 1px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; margin-right: 6px; }
+  .srcchip { font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; white-space: nowrap; background: var(--code); color: var(--text); }
+  .srcchip small { font-weight: 500; color: var(--muted); margin-left: 4px; }
+  .srcchip.c-agent { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+  .srcchip.c-orch { background: color-mix(in srgb, var(--queued) 15%, transparent); color: var(--queued); }
+  .srcchip.c-human { background: color-mix(in srgb, var(--hold) 15%, transparent); color: var(--hold); }
+  .srcchip.c-engine { color: var(--muted); }
+  .ldiv { display: flex; align-items: center; gap: 10px; padding: 10px 12px 6px; font-size: 12.5px; font-weight: 700; }
+  .ldiv::before, .ldiv::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .ldiv em { font-style: normal; font-weight: 600; color: var(--muted); }
+  .ldiv.st-done em { color: var(--done); } .ldiv.st-failed em { color: var(--failed); } .ldiv.st-waiting em { color: var(--hold); } .ldiv.st-running em { color: var(--running); }
+  @media (max-width: 640px) {
+    .lrow { grid-template-columns: auto minmax(0, 1fr); }
+    .lrow time { grid-column: 1 / -1; padding: 0; }
+  }
   .health { display: flex; flex-wrap: wrap; gap: 6px; }
   .health span { font-size: 12px; padding: 4px 9px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); }
   .health span::before { content: "●"; margin-right: 5px; color: var(--done); }
@@ -653,21 +681,79 @@ async function renderChat() {
 }
 
 // ---- activity
-const EV_KINDS = [["", "All"], ["status", "Steps"], ["tool", "Tools"], ["message", "Agent messages"], ["human", "Human"], ["error", "Errors"]];
+const EV_KINDS = [["", "All"], ["step", "Steps"], ["tool", "Tools"], ["message", "Messages"], ["human", "Human"], ["error", "Errors"]];
+const ROUTINE = /^(dispatching to |job \S+ (ok|failed) after|picked up `|resuming (conversation|claude session|codex session))/;
+function srcChip(src) {
+  const [who] = String(src || "").split("@");
+  const cls = who.startsWith("engine") ? "c-engine" : who === "orchestrator" ? "c-orch" : ["user", "human"].includes(who) ? "c-human"
+    : who.startsWith("scheduler") || who === "notifier" ? "c-sys" : "c-agent";
+  const where = String(src).includes("@") ? String(src).split("@")[1].replace(/^ai_team_/, "") : "";
+  return `<span class="srcchip ${cls}" title="${esc(src)}">${esc(who.replace(/^engine\//, ""))}${where ? `<small>${esc(where)}</small>` : ""}</span>`;
+}
+function buildLog(events) {
+  const rows = [], open = {};
+  for (const e of events) {
+    const d = e.data || {};
+    if (d.phase === "start") { rows.push({ t: "divider", e, label: d.step }); continue; }
+    if (["done", "failed", "waiting"].includes(d.phase)) {
+      const div = [...rows].reverse().find(r => r.t === "divider" && r.label === d.step && !r.end);
+      if (div) { div.end = d.phase; div.seconds = d.seconds; }
+      if (d.phase !== "done") rows.push({ t: "row", e, kind: d.phase === "failed" ? "error" : "human" });
+      continue;
+    }
+    if (d.phase === "pickup") { const div = [...rows].reverse().find(r => r.t === "divider" && r.label === d.step); if (div) div.role = d.role; }
+    if (e.kind === "tool") { const r = { t: "tool", e, d }; rows.push(r); open[d.id || e.source] = r; continue; }
+    if (e.kind === "tool_result") { const r = open[d.id || e.source]; if (r && !r.res) { r.res = { e, d }; delete open[d.id || e.source]; continue; } }
+    rows.push({ t: "row", e, kind: e.kind, routine: e.kind === "status" && ROUTINE.test(e.content) });
+  }
+  return rows;
+}
 function renderActivity() {
   const body = $("#tabbody");
-  if (!$("#evlog")) body.innerHTML = `<div class="row" style="margin-bottom:8px"><span class="grow small muted">Raw activity log</span><button id="tlback">Timeline view</button></div>
-    <div class="chips" id="evf"></div><div class="card" style="padding:6px 12px"><div id="evlog"></div></div>`;
-  $("#tlback").onclick = () => { S.tlRaw = false; $("#tabbody").innerHTML = ""; renderTimeline(); };
+  if (!$("#evlog")) {
+    body.innerHTML = `<div class="row" style="margin-bottom:8px"><input id="evq" type="search" class="grow" placeholder="Search the log"><button id="tlback">Timeline</button></div>
+      <div class="chips" id="evf"></div><label class="row tiny muted" style="margin:2px 0 8px;gap:6px"><input type="checkbox" id="evroutine" style="width:auto;min-height:0"> show routine entries</label>
+      <div class="log" id="evlog"></div>`;
+    $("#tlback").onclick = () => { S.tlRaw = false; $("#tabbody").innerHTML = ""; renderTimeline(); };
+    $("#evq").value = S.evQ || ""; $("#evq").oninput = e => { S.evQ = e.target.value; renderActivity(); };
+    $("#evroutine").checked = !!S.evRoutine; $("#evroutine").onchange = e => { S.evRoutine = e.target.checked; renderActivity(); };
+    $("#evlog").addEventListener("click", e => { const r = e.target.closest(".lrow.expandable"); if (r) r.classList.toggle("open"); });
+  }
   $("#evf").innerHTML = EV_KINDS.map(([k, l]) => `<button class="chip ${S.evKind === k ? "on" : ""}" data-k="${k}">${l}</button>`).join("");
   $$("#evf .chip").forEach(c => c.onclick = () => { S.evKind = c.dataset.k; renderActivity(); });
+  const want = S.evKind, q = (S.evQ || "").toLowerCase();
+  const openRows = new Set($$("#evlog .lrow.open").map(r => r.dataset.seq));
   const nearBottom = innerHeight + scrollY >= document.body.scrollHeight - 80;
-  const want = S.evKind;
-  const evs = S.events.filter(e => !want || e.kind === want || (want === "tool" && e.kind === "tool_result"));
-  $("#evlog").innerHTML = evs.map(e => `<div class="ev ${esc(e.kind)}"><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> <span class="s">${esc(e.source)}</span> ${esc(e.content)}</div>`).join("") || `<div class="empty">No activity yet.</div>`;
-  if (nearBottom) scrollTo(0, document.body.scrollHeight);
+  const time = ts => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const rows = buildLog(S.events).filter(r => {
+    if (r.t === "divider") return !want || want === "step";
+    if (r.routine && !S.evRoutine) return false;
+    const kind = r.t === "tool" ? "tool" : r.kind;
+    if (want === "step") return false;
+    if (want && kind !== want) return false;
+    if (q) { const hay = `${r.e.source} ${r.e.content} ${r.res?.e.content || ""} ${r.res?.d.output || ""}`.toLowerCase(); if (!hay.includes(q)) return false; }
+    return true;
+  });
+  $("#evlog").innerHTML = rows.map(r => {
+    const e = r.e, seq = e.seq, o = openRows.has(String(seq)) ? "open" : "";
+    if (r.t === "divider") {
+      const st = r.end || "running";
+      return `<div class="ldiv st-${st}"><span>${esc(r.label)}${r.role ? ` · ${esc(r.role)}` : ""}</span><em>${{ running: "running", done: "done", failed: "failed", waiting: "needs you" }[st]}${r.seconds != null ? ` · ${r.seconds}s` : ""}</em></div>`;
+    }
+    if (r.t === "tool") {
+      const ok = r.res ? r.res.d.ok !== false : null, out = r.res ? (r.res.d.output ?? r.res.e.content) : "";
+      return `<div class="lrow expandable ${o}" data-seq="${seq}"><time>${time(e.ts)}</time>${srcChip(e.source)}
+        <div class="ltext"><i class="tdot st-${ok == null ? "running" : ok ? "done" : "failed"}"></i><b class="mono">${esc(r.d.tool || "tool")}</b>
+          <span class="muted">${esc(argPreview({ args: r.d.args, summary: e.content }))}</span>${r.res?.d.seconds != null ? ` <span class="tiny muted">${r.res.d.seconds}s</span>` : ""}
+          <pre class="lmore ${ok === false ? "bad" : ""}">${esc(argText(r.d.args) || e.content)}\n\n→ ${esc(out || "running…")}</pre></div></div>`;
+    }
+    const icon = { message: "💬", error: "⚠️", human: "🙋", status: "", tool_result: "↳" }[r.kind] ?? "";
+    const long = r.kind === "message" && e.content.length > 220;
+    return `<div class="lrow k-${r.kind} ${long ? "expandable clamp" : ""} ${o}" data-seq="${seq}"><time>${time(e.ts)}</time>${srcChip(e.source)}
+      <div class="ltext">${icon ? `<span class="licon">${icon}</span>` : ""}${r.kind === "message" ? `<div class="md">${md(e.content)}</div>` : esc(e.content)}</div></div>`;
+  }).join("") || `<div class="empty">Nothing matches.</div>`;
+  if (nearBottom && S.task && ACTIVE.includes(S.task.status)) scrollTo(0, document.body.scrollHeight);
 }
-
 
 // ---- timeline (Claude-style transcript of what the agents did)
 const SKIP_STATUS = /^(dispatching to |job \S+ (ok|failed) after|picked up `|finished `)/;
@@ -733,7 +819,7 @@ function tlChild(c) {
 }
 function renderTimeline() {
   const body = $("#tabbody");
-  if (!$("#tl")) body.innerHTML = `<div class="row" style="margin-bottom:10px"><span class="grow small muted">What the team did, step by step</span><button id="tlraw">Raw log</button></div><div class="tl" id="tl"></div>`;
+  if (!$("#tl")) body.innerHTML = `<div class="row" style="margin-bottom:10px"><span class="grow small muted">What the team did, step by step</span><button id="tlraw">Activity log</button></div><div class="tl" id="tl"></div>`;
   $("#tlraw").onclick = () => { S.tlRaw = true; $("#tabbody").innerHTML = ""; renderActivity(); };
   const nearBottom = innerHeight + scrollY >= document.body.scrollHeight - 120;
   const items = buildTimeline(S.events);
