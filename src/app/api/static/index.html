@@ -105,6 +105,13 @@
   .chip { flex: none; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 0 12px; font-size: 13px; font-weight: 600; color: var(--text); min-height: 36px; display: inline-flex; align-items: center; gap: 6px; }
   .chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .chip b { font-variant-numeric: tabular-nums; opacity: .75; }
+  .agents { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  @media (min-width: 640px) { .agents { grid-template-columns: repeat(4, 1fr); } }
+  .agent { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; box-shadow: var(--shadow); min-width: 0; }
+  .agent b { font-size: 13.5px; }
+  .agent .cnt { font-weight: 750; font-size: 18px; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .agent.on { border-color: color-mix(in srgb, var(--running) 55%, var(--line)); }
+  .agent.on .cnt { color: var(--running); }
   .health { display: flex; flex-wrap: wrap; gap: 6px; }
   .health span { font-size: 12px; padding: 4px 9px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); }
   .health span::before { content: "●"; margin-right: 5px; color: var(--done); }
@@ -362,6 +369,11 @@ async function viewHome() {
     <div class="list">${d.running.length ? d.running.map(t => taskItem(t,
       `${(t.current || []).map(s => `<span class="step">${esc(s)}</span>`).join("")}<span>⏱ ${dur(t.started_at)}</span><span>${t.steps_done} step${t.steps_done === 1 ? "" : "s"} done</span>`)).join("")
       : `<div class="card empty">Nothing running. Tap <b>+</b> to give the team a task.</div>`}</div>
+
+    <div class="section"><h2>Agents</h2><span class="grow"></span><span class="tiny muted">${d.agents.types.length} types · ${d.agents.running} running · ${d.agents.busy_workers}/${d.agents.workers} workers busy</span></div>
+    <div class="agents">${d.agents.types.map(a => `<div class="agent ${a.running ? "on" : ""}">
+      <div class="row"><b class="grow ellipsis">${esc(a.title)}</b><span class="cnt">${a.running}</span></div>
+      <div class="tiny muted ellipsis">${a.running ? a.jobs.map(j => `#${j.task_id} ${esc(j.node)}`).join(" · ") || "working" : "idle"}</div></div>`).join("")}</div>
 
     ${d.queued.length ? `<div class="section"><h2>Up next</h2><span class="grow"></span><a href="#/tasks?status=created,queued">See all</a></div>
     <div class="list">${d.queued.map(t => taskItem(t, `<span>${ago(t.created_at)}</span>`)).join("")}</div>` : ""}

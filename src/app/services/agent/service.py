@@ -1,6 +1,7 @@
 """An agent node: consumes agent jobs and runs them with the role's provider chain (full-access tools,
 skills, browser). Several replicas share the consumer group; a crashed replica's job is taken over."""
 import logging
+import time
 
 from ... import constants as C
 from ...domain.events import AgentJob
@@ -13,11 +14,18 @@ from ..common import Service
 log = logging.getLogger(__name__)
 
 
+CURRENT: dict[str, dict] = {}   # job id -> what this replica is doing right now (reported in its heartbeat)
+
+
 def handle_job(payload: dict) -> None:
     job = AgentJob(**payload)
     if executor.existing_result(job.job_id):   # finished before a crash, just not acked
         return
-    executor.deliver(executor.execute(job))
+    CURRENT[job.job_id] = {"role": job.role, "task_id": job.task_id, "node": job.node, "since": time.time()}
+    try:
+        executor.deliver(executor.execute(job))
+    finally:
+        CURRENT.pop(job.job_id, None)
 
 
 class AgentService(Service):
@@ -34,7 +42,7 @@ class AgentService(Service):
 
     def status(self):
         return {"busy": self.consumer.busy, "capacity": self.consumer.concurrency,
-                "providers": [p.name for p in llm_registry.enabled()]}
+                "providers": [p.name for p in llm_registry.enabled()], "jobs": list(CURRENT.values())}
 
     def run(self):
         self.consumer.run(self.stop)

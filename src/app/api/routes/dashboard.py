@@ -6,6 +6,7 @@ from ... import constants as C
 from ...domain.enums import TaskStatus
 from ...persistence import task_repository as tasks
 from ...persistence.store import db
+from ...agents.registry import roster
 from ...services.common import live_services
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
@@ -48,4 +49,20 @@ def dashboard(limit: int = 5):
         "busy_agents": sum(1 for s in services if s["kind"] == "agent" and s.get("busy")),
         "busy_engines": sum(1 for s in services if s["kind"] == "engine" and s.get("busy")),
         "unread": db()[C.C_NOTIFICATIONS].count_documents({"read": False}),
+        "agents": _agents(services),
     }
+
+
+def _agents(services: list[dict]) -> dict:
+    """Agent types (the roster) and how many workers run each type right now. Workers are generic: any of them
+    can run any type, so "running" counts current jobs per type across all agent workers."""
+    workers = [s for s in services if s["kind"] == "agent"]
+    jobs = [{**j, "worker": w["host"]} for w in workers for j in w.get("jobs") or []]
+    orchestrating = sum(s.get("busy") or 0 for s in services if s["kind"] == "orchestrator")
+    types = []
+    for r in roster():
+        running = orchestrating if r["role"] == "orchestrator" else sum(1 for j in jobs if j["role"] == r["role"])
+        types.append({"role": r["role"], "title": r.get("title") or r["role"], "tier": r.get("tier"),
+                      "running": running, "jobs": [j for j in jobs if j["role"] == r["role"]]})
+    return {"types": types, "workers": len(workers), "busy_workers": sum(1 for w in workers if w.get("busy")),
+            "running": len(jobs)}
