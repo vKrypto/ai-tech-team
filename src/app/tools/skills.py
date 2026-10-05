@@ -1,6 +1,6 @@
 """The skills library (synced from the host's Claude skills by deploy.sh) as tools for chat-model providers."""
 import re
-from functools import cache
+import time
 
 from langchain_core.tools import tool
 
@@ -8,8 +8,14 @@ from ..settings import settings
 from .base import ToolContext, guarded
 
 
-@cache
+_cache: tuple[float, list] = (0.0, [])
+
+
 def index() -> list[tuple[str, str]]:
+    """(name, description) of every skill; re-read at most every 5 minutes so newly synced skills appear."""
+    global _cache
+    if time.time() - _cache[0] < 300:
+        return _cache[1]
     out = []
     root = settings.skills_dir
     if root.is_dir():
@@ -17,6 +23,7 @@ def index() -> list[tuple[str, str]]:
             head = f.read_text(errors="ignore")[:3000]
             m = re.search(r"^description:\s*(.+)$", head, re.M)
             out.append((f.parent.name, (m.group(1).strip().strip('"') if m else "")[:300]))
+    _cache = (time.time(), out)
     return out
 
 

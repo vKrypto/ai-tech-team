@@ -112,6 +112,11 @@
   .agent .cnt { font-weight: 750; font-size: 18px; font-variant-numeric: tabular-nums; color: var(--muted); }
   .agent.on { border-color: color-mix(in srgb, var(--running) 55%, var(--line)); }
   .agent.on .cnt { color: var(--running); }
+  .info { min-height: 0; width: 22px; height: 22px; padding: 0; border-radius: 50%; font: italic 700 12px/1 Georgia, serif;
+    color: var(--muted); border: 1px solid var(--line); background: var(--panel2); flex: none; position: relative; }
+  .info::after { content: ""; position: absolute; inset: -11px; }   /* 44px touch target */
+  .info:hover { color: var(--accent); border-color: var(--accent); }
+  .resp { margin: 0; padding-left: 18px; font-size: 14px; } .resp li { margin: 4px 0; }
   .health { display: flex; flex-wrap: wrap; gap: 6px; }
   .health span { font-size: 12px; padding: 4px 9px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); }
   .health span::before { content: "●"; margin-right: 5px; color: var(--done); }
@@ -372,7 +377,7 @@ async function viewHome() {
 
     <div class="section"><h2>Agents</h2><span class="grow"></span><span class="tiny muted">${d.agents.types.length} types · ${d.agents.running} running · ${d.agents.busy_workers}/${d.agents.workers} workers busy</span></div>
     <div class="agents">${d.agents.types.map(a => `<div class="agent ${a.running ? "on" : ""}">
-      <div class="row"><b class="grow ellipsis">${esc(a.title)}</b><span class="cnt">${a.running}</span></div>
+      <div class="row"><b class="grow ellipsis">${esc(a.title)}</b><button class="info" data-role="${esc(a.role)}" aria-label="What does the ${esc(a.title)} do?">i</button><span class="cnt">${a.running}</span></div>
       <div class="tiny muted ellipsis">${a.running ? a.jobs.map(j => `#${j.task_id} ${esc(j.node)}`).join(" · ") || "working" : "idle"}</div></div>`).join("")}</div>
 
     ${d.queued.length ? `<div class="section"><h2>Up next</h2><span class="grow"></span><a href="#/tasks?status=created,queued">See all</a></div>
@@ -383,6 +388,33 @@ async function viewHome() {
 
     <div class="section"><h2>Platform</h2><span class="grow"></span><a href="#/system">Details</a></div>
     <div class="health">${Object.entries(d.services).map(([k, v]) => `<span class="${v ? "" : "down"}">${k}${v > 1 ? " ×" + v : ""}</span>`).join("")}</div>`;
+  S.agentTypes = d.agents.types; AG = d.agents;
+  $$(".agent .info").forEach(b => b.onclick = e => { e.stopPropagation(); showAgent(b.dataset.role); });
+}
+let AG = { skills: [], limits: [], tools_off: [], cli_note: "" };
+function showAgent(role) {
+  const a = (S.agentTypes || []).find(x => x.role === role); if (!a) return;
+  openSheet(`<div class="row"><h2 class="grow" style="margin:0;font-size:18px">${esc(a.title)}</h2>
+      <span class="badge" style="--c:${a.running ? "var(--running)" : "var(--created)"}">${a.running ? `${a.running} running` : "idle"}</span></div>
+    <div class="small muted" style="margin:6px 0 12px">${esc(a.description)}</div>
+    <div class="small" style="font-weight:700;margin-bottom:4px">Responsibilities</div>
+    <ul class="resp">${a.responsibilities.map(r => `<li>${esc(r)}</li>`).join("") || "<li>—</li>"}</ul>
+    ${a.used_by.length ? `<div class="small" style="font-weight:700;margin:14px 0 6px">Handles these workflow steps</div>
+      <div class="row wrap" style="gap:6px">${a.used_by.map(u => `<span class="step">${esc(u)}</span>`).join("")}</div>` : ""}
+    ${a.jobs.length ? `<div class="small" style="font-weight:700;margin:14px 0 6px">Working on now</div>
+      <div class="list">${a.jobs.map(j => `<a class="item" href="#/task/${j.task_id}"><b>#${j.task_id}</b> · step <span class="step">${esc(j.node)}</span> <span class="tiny muted">on ${esc(j.worker)} · ${dur(j.since * 1000)}</span></a>`).join("")}</div>` : ""}
+    <div class="small" style="font-weight:700;margin:14px 0 6px">Tools</div>
+    ${a.tools.length ? a.tools.map(g => `<div style="margin:8px 0"><div class="tiny"><b>${esc(g.group)}</b> <span class="muted">· ${esc(g.about)}</span></div>
+      <div class="row wrap" style="gap:5px;margin-top:4px">${g.tools.map(t => `<span class="step" title="${esc(t.description)}">${esc(t.name)}</span>`).join("")}</div></div>`).join("")
+      : `<div class="tiny muted">None: this agent only makes a structured routing call.</div>`}
+    ${a.tools.length ? `<div class="tiny muted" style="margin-top:4px">${esc(AG.cli_note)}${AG.tools_off.length ? ` Not enabled yet: ${esc(AG.tools_off.map(g => g === "github" ? "github (needs the GitHub login)" : g).join(", "))}.` : ""}</div>` : ""}
+    ${a.tools.length ? `<details class="box" style="margin-top:12px"><summary class="small">Skills · ${AG.skills.length} available</summary>
+      <div class="row wrap" style="gap:5px">${AG.skills.map(k => `<span class="step" title="${esc(k.description)}">${esc(k.name)}</span>`).join("")}</div></details>
+      <details class="box" style="margin-top:10px"><summary class="small">Limits (apply to every agent)</summary>
+      <ul class="resp tiny">${AG.limits.map(l => `<li>${esc(l)}</li>`).join("")}</ul></details>` : ""}
+    <div class="tiny muted" style="margin-top:12px">Model tier: ${esc(a.tier || "—")}</div>
+    <button style="width:100%;margin-top:14px" id="aclose">Close</button>`);
+  $("#aclose").onclick = closeSheet;
 }
 
 // ===================================================================== tasks list

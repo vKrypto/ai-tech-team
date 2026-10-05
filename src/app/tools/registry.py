@@ -40,3 +40,27 @@ def build(ctx: ToolContext, groups: list[str]) -> list:
         for module in GROUPS.get(gname, []):
             tools += module.make(ctx)
     return tools
+
+
+GROUP_INFO = {
+    "filesystem": "Read, write, edit and search files in the workspace",
+    "shell": "Run any shell command: tests, builds, package managers, curl, scripts",
+    "git": "Status, diff and local commits (push only when enabled)",
+    "github": "GitHub CLI: pull requests, reviews, issues, projects",
+    "web": "Web search and HTTP requests",
+    "database": "Query and inspect SQLite databases",
+    "browser": "Headless Chromium: open pages, click, fill, run JS, screenshots",
+    "skills": "List and load skills (packaged know-how) from the skills library",
+}
+
+
+def catalog() -> dict[str, list[dict]]:
+    """Every tool per group, introspected from the tool code itself (names + first docstring line), so the
+    dashboard always shows what agents can really call."""
+    from pathlib import Path
+    ctx = ToolContext(cwd=Path("."))
+    out = {}
+    for gname, modules in GROUPS.items():
+        out[gname] = [{"name": t.name, "description": (t.description or "").strip().split("\n")[0]}
+                      for m in modules for t in m.make(ctx)]
+    return out

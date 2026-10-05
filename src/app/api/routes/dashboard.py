@@ -7,6 +7,11 @@ from ...domain.enums import TaskStatus
 from ...persistence import task_repository as tasks
 from ...persistence.store import db
 from ...agents.registry import roster
+from ...guardrails.tool_permissions import SECRET_DIRS
+from ...orchestration.tool_selector import groups_for
+from ...settings import settings
+from ...tools import registry as tool_registry
+from ...tools.skills import index as skills_index
 from ...services.common import live_services
 
 router = APIRouter(prefix="/api", tags=["dashboard"])
@@ -56,6 +61,7 @@ def dashboard(limit: int = 5):
 def _agents(services: list[dict]) -> dict:
     """Agent types (the roster) and how many workers run each type right now. Workers are generic: any of them
     can run any type, so "running" counts current jobs per type across all agent workers."""
+    catalog = tool_registry.catalog()
     workers = [s for s in services if s["kind"] == "agent"]
     jobs = [{**j, "worker": w["host"]} for w in workers for j in w.get("jobs") or []]
     orchestrating = sum(s.get("busy") or 0 for s in services if s["kind"] == "orchestrator")
@@ -63,6 +69,18 @@ def _agents(services: list[dict]) -> dict:
     for r in roster():
         running = orchestrating if r["role"] == "orchestrator" else sum(1 for j in jobs if j["role"] == r["role"])
         types.append({"role": r["role"], "title": r.get("title") or r["role"], "tier": r.get("tier"),
+                      "description": r.get("description", ""), "responsibilities": r.get("responsibilities") or [],
+                      "used_by": r.get("used_by") or [],
+                      "tools": [{"group": g, "about": tool_registry.GROUP_INFO.get(g, ""), "tools": catalog[g]}
+                                for g in groups_for(r["role"])],
                       "running": running, "jobs": [j for j in jobs if j["role"] == r["role"]]})
+    off = [g for g in tool_registry.GROUPS if g not in tool_registry.available_groups()]
     return {"types": types, "workers": len(workers), "busy_workers": sum(1 for w in workers if w.get("busy")),
-            "running": len(jobs)}
+            "running": len(jobs),
+            "skills": [{"name": n, "description": d} for n, d in skills_index()],
+            "tools_off": off,
+            "limits": ["Files only inside the workspace; the ai-team folder and " + ", ".join(map(str, SECRET_DIRS)) + " are hidden",
+                       "Host-destroying commands are refused (rm -rf /, mkfs, sudo, …)",
+                       "Secrets are redacted from everything stored or shown",
+                       "git push " + ("allowed for feature branches" if settings.git_push_enabled else "disabled")],
+            "cli_note": "Claude Code / Codex agents use their built-in equivalents of these tools plus the Playwright browser (MCP)."}

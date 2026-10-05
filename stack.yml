@@ -76,6 +76,7 @@ services:
       - {type: bind, source: "${WORKSPACE_HOST_DIR}", target: /workspace, read_only: true}
       - {type: tmpfs, target: /workspace/ai-team}
       - {type: bind, source: "${DATA_HOST_DIR}/github", target: /data/github}
+      - {type: bind, source: "${DATA_HOST_DIR}/skills", target: /data/skills, read_only: true}   # listed on the dashboard
     deploy: *deploy
 
   orchestrator:     # consumes tasks, understands them, picks workflow  -> status: queued

@@ -9,45 +9,92 @@ roles:
     tier: fast
     tools: []
     used_by: [orchestrator service]
+    responsibilities:
+      - "Reads every new task and follow-up"
+      - "Works out the task type, the project (existing or new) and the complexity"
+      - "Picks the workflow (coding, research, PR review, scrum, task execution) and model tier"
+      - "Hands the task to a workflow engine; notifies you about holds, failures and completions"
+      - "Auto-retries runs that crashed"
   architect:
     title: Platform Architect
     description: Task planner. Explores the codebase, designs the approach, breaks work into steps with acceptance criteria.
     tier: balanced
     tools: all
     used_by: [coding/inspect_repo, coding/plan_changes, task_execution/understand_task, plan_task, replan, complete]
+    responsibilities:
+      - "Explores the codebase, configs and history before anything is built"
+      - "Designs the approach and writes the implementation plan"
+      - "Breaks big requests into steps and assigns each to the right agent"
+      - "Defines acceptance criteria for the Team Lead and Tester"
+      - "Re-plans when a step fails validation; writes the final answer for questions and plans"
   senior_engineer:
     title: Senior Software Engineer
     description: Implements features and fixes, writes and runs unit tests, keeps the build green.
     tier: balanced
     tools: all
     used_by: [coding/implement, task_execution steps]
+    responsibilities:
+      - "Implements features and bug fixes in the project's own style"
+      - "Writes and runs unit tests for every change"
+      - "Keeps the build, linters and type checks green"
+      - "Works on its own branch per task: feat/<task_id>-<name> (sub-tasks: …--<sub-task>)"
+      - "Commits as feat(#<id>): …; never commits to main"
+      - "Addresses every point of review and test feedback"
   team_lead:
     title: Team Lead
     description: Task reviewer. Reviews the work against the request and acceptance criteria; approves or sends it back.
     tier: balanced
     tools: all
     used_by: [coding/review, task_execution/validate_result, validation/judge]
+    responsibilities:
+      - "Reviews the work against the request and the acceptance criteria"
+      - "Checks correctness, edge cases, security, tests and consistency"
+      - "Approves, or sends the work back to the engineer with specific fixes"
+      - "Validates each step of multi-step tasks"
+      - "Never edits code itself"
   tester:
     title: Tester
     description: Cross-verifies that the feature works as expected by exercising it for real (run the app, API calls, browser).
     tier: balanced
     tools: all
     used_by: [coding/test, validation/run_checks, pr_review/verify_pr]
+    responsibilities:
+      - "Cross-verifies that the feature really works, independently of the unit tests"
+      - "Runs the app, calls the API, drives the UI in a headless browser"
+      - "Tests happy paths, edge cases, invalid input and regressions"
+      - "Reports each scenario with evidence (commands, screenshots)"
+      - "Verifies pull requests in a throwaway worktree; never fixes code itself"
   pr_reviewer:
     title: PR Reviewer
     description: Reviews GitHub pull requests (diff, context, CI) and posts the review on the PR.
     tier: balanced
     tools: all
     used_by: [pr_review/inspect_pr, review_pr, post_review]
+    responsibilities:
+      - "Reviews GitHub pull requests: description, diff, linked issues and CI status"
+      - "Checks correctness, tests, security, performance and compatibility"
+      - "Writes specific, actionable review comments (blocking vs suggestions)"
+      - "Posts the review on the PR (comment or verdict, per policy)"
   scrum_master:
     title: Scrum Master
     description: Maintains projects on GitHub - issues, labels, milestones, project boards, sprint/standup reports.
     tier: balanced
     tools: all
     used_by: [scrum/*]
+    responsibilities:
+      - "Keeps GitHub projects organised: issues, labels, milestones, assignees"
+      - "Triages new issues and splits epics into actionable issues"
+      - "Keeps project boards up to date; closes stale or finished items with a reason"
+      - "Writes sprint and stand-up reports (done, in progress, blocked, next)"
+      - "Never deletes issues, branches or projects"
   researcher:
     title: Researcher
     description: Investigates with web search, fetch and the browser; reports findings with sources.
     tier: balanced
     tools: all
     used_by: [research/*, task_execution steps]
+    responsibilities:
+      - "Investigates questions with web search, documentation and the browser"
+      - "Reads primary sources and compares options"
+      - "Separates facts from opinions, notes versions and dates"
+      - "Writes reports with a clear answer, trade-offs and cited sources"
