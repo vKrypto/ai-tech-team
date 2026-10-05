@@ -37,6 +37,9 @@
   .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .clamp2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .hidden { display: none !important; }
+  .addbtn { flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; }
+  .addbtn svg { width: 20px; height: 20px; }
+  @media (max-width: 520px) { .addbtn span { display: none; } .addbtn { width: 44px; padding: 0; justify-content: center; } }
 
   /* ---------- login ---------- */
   #login { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px calc(24px + var(--safe-b)); }
@@ -377,11 +380,13 @@ async function viewTasks(first) {
   const [tasks, meta] = await Promise.all([api("/api/tasks?" + p), first || !S.meta ? api("/api/meta") : S.meta]);
   S.tasks = tasks; S.meta = meta;
   if (!$("#tasklist")) {
-    $("#view").innerHTML = `<input id="q" type="search" placeholder="Search tasks" enterkeyhint="search" style="margin-bottom:10px">
+    $("#view").innerHTML = `<div class="row" style="margin-bottom:10px"><input id="q" class="grow" type="search" placeholder="Search tasks" enterkeyhint="search">
+        <button class="primary addbtn" id="tnew" aria-label="New task">${ICON.plus}<span>New task</span></button></div>
       <div class="chips" id="fchips"></div>
       <select id="fproj" style="margin:4px 0 12px"><option value="">All projects</option></select>
       <div class="list" id="tasklist"></div>`;
     $("#q").value = S.filter.q;
+    $("#tnew").onclick = openNewTask;
     let deb; $("#q").oninput = e => { clearTimeout(deb); deb = setTimeout(() => { S.filter.q = e.target.value; refresh(); }, 250); };
     $("#fproj").onchange = e => { S.filter.project = e.target.value; refresh(); };
   }
