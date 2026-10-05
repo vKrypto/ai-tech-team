@@ -19,7 +19,8 @@ WORKDIR /app
 # Python deps first (cached unless pyproject changes)
 COPY pyproject.toml .
 RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" \
-      > /tmp/requirements.txt && pip install -r /tmp/requirements.txt
+      > /tmp/requirements.txt && pip install -r /tmp/requirements.txt \
+    && pip install pytest uv   # for the agents: run Python test suites, set up per-project environments
 
 # Browsers: Python Playwright's Chromium (+ system deps), and the Playwright MCP server with its own
 # Playwright's Chromium (versions can differ), both under /ms-playwright.

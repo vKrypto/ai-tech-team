@@ -6,4 +6,4 @@ def receive_task(state: dict) -> dict:
     updates = validate_task(state)
     if updates.get("failed"):
         return updates
-    return {**updates, **load_context(state)}
+    return {**updates, **load_context(state, node="receive_task")}

@@ -96,7 +96,8 @@ class ClaudeCodeProvider(Provider):
                             req.log("message", final)
                         elif block.get("type") == "tool_use":
                             inp = block.get("input") or {}
-                            req.log("tool", _summarize(block.get("name", "?"), inp))
+                            req.log("tool", _summarize(block.get("name", "?"), inp),
+                                    {"tool": block.get("name", "?"), "args": inp, "id": block.get("id")})
                             if block.get("name") in EDIT_TOOLS and inp.get("file_path"):
                                 if (r := _rel(inp["file_path"])) is not None:
                                     req.changed.add(r)
@@ -108,7 +109,8 @@ class ClaudeCodeProvider(Provider):
                                 x.get("text", "") for x in c or [] if isinstance(x, dict))
                             first = (text or "").strip().splitlines()[0][:160] if (text or "").strip() else "(empty)"
                             req.log("tool_result", ("error: " if block.get("is_error") else "") +
-                                    f"{len(text or '')} chars: {first}")
+                                    f"{len(text or '')} chars: {first}",
+                                    {"output": text or "", "ok": not block.get("is_error"), "id": block.get("tool_use_id")})
                 elif ev.get("type") == "result":
                     result = ev
             proc.wait(timeout=60)

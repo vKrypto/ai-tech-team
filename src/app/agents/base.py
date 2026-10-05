@@ -81,7 +81,8 @@ class Agent:
             if i > 0:
                 brief = ("Note: a previous attempt at this step by another agent failed part-way; check the "
                          "current state of the files before continuing.\n\n" + brief)
-            log("status", f"{self.role} on {provider.name} ({provider.model_for(tier) or 'default'}, {tier})")
+            log("status", f"{self.role} on {provider.name} ({provider.model_for(tier) or 'default'}, {tier})",
+                {"phase": "provider", "role": self.role, "provider": provider.name, "model": provider.model_for(tier), "tier": tier})
             req = AgentRequest(job_id=job.job_id, task_id=job.task_id, node=job.node, role=self.role,
                                system_prompt=system, brief=brief, tier=tier, cwd=cwd,
                                session=job.sessions.get(f"{self.role}@{provider.name}"),

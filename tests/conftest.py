@@ -27,12 +27,17 @@ def platform(monkeypatch):
 
 
 @pytest.fixture
-def make_task(platform):
-    """Create a task already routed to `workflow` and queued, like the orchestrator leaves it."""
+def make_task(platform, tmp_path, monkeypatch):
+    """Create a task already routed to `workflow` and queued, like the orchestrator leaves it. Runs against a
+    temporary workspace; the project folder exists unless exists=False."""
     from app.domain.enums import TaskStatus
     from app.persistence import task_repository as tasks
+    from app.settings import settings
+    monkeypatch.setattr(settings, "workspace_root", tmp_path)
 
-    def make(text: str, workflow: str, project: str = "general"):
+    def make(text: str, workflow: str, project: str = "general", exists: bool = True):
+        if project != "general" and exists:
+            (tmp_path / project).mkdir(exist_ok=True)
         t = tasks.create(text, "api")
         meta = {"title": text[:40], "project": project, "workflow": workflow, "task_type": "development",
                 "model_tier": "fast", "project_is_new": False}

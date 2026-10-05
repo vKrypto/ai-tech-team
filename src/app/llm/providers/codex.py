@@ -78,7 +78,10 @@ class CodexProvider(Provider):
                         if t == "agent_message" and item.get("text"):
                             log("message", item["text"])
                         elif t == "command_execution":
-                            log("tool", f"shell({item.get('command', '')[:160]!r}) -> exit {item.get('exit_code')}")
+                            log("tool", f"shell({item.get('command', '')[:160]!r}) -> exit {item.get('exit_code')}",
+                                {"tool": "shell", "args": {"command": item.get("command", "")}})
+                            log("tool_result", f"exit {item.get('exit_code')}",
+                                {"tool": "shell", "output": item.get("aggregated_output") or "", "ok": item.get("exit_code") == 0})
                         elif t == "file_change":
                             for c in item.get("changes", []):
                                 log("tool", f"edit({c.get('kind')} {c.get('path')})")

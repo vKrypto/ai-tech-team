@@ -1,6 +1,13 @@
 """Rules applied on top of the orchestrator's understanding."""
 import re
 
+# a task only creates a new project when it says so explicitly
+EXPLICIT_NEW = re.compile(
+    r"\b(new|fresh)\s+(project|repo|repository|app|application|service|website|site|tool|library|cli)\b"
+    r"|\b(create|start|scaffold|bootstrap|initiali[sz]e|set ?up)\s+(a|an|the)?\s*(new\s+)?"
+    r"(project|repo|repository|app|application|service|website|site|tool|library|cli)\b"
+    r"|\bfrom scratch\b", re.I)
+
 from ...settings import settings
 from .schemas import TaskUnderstanding
 
@@ -39,13 +46,16 @@ def heuristic(text: str, projects: list[str]) -> TaskUnderstanding:
         rationale="keyword heuristic")
 
 
-def normalize(u: TaskUnderstanding, projects: list[str], hint: str | None = None) -> TaskUnderstanding:
+def normalize(u: TaskUnderstanding, projects: list[str], hint: str | None = None, text: str = "") -> TaskUnderstanding:
     if hint and hint in projects:
         u.project, u.project_is_new = hint, False
+    valid_name = bool(re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,60}", u.project or ""))
     if u.project in projects:
         u.project_is_new = False
-    elif u.project_is_new and re.fullmatch(r"[a-z0-9][a-z0-9._-]{1,60}", u.project or ""):
-        pass  # new project folder, created by the workflow
+    elif u.project and u.project != "general" and valid_name:
+        # A project that isn't in the workspace is only "new" if the task explicitly asks to create one.
+        # Otherwise keep the name: the workflow stops and asks the human (create it, or clone the real repo).
+        u.project_is_new = bool(EXPLICIT_NEW.search(text or ""))
     else:
         u.project, u.project_is_new = "general", False
     if u.workflow not in (settings.workflows.get("workflows") or {}):

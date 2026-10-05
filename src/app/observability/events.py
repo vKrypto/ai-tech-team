@@ -12,8 +12,22 @@ MAX = 20_000
 LOG_PREVIEW = 300
 
 
-def emit(task_id: int, source: str, kind: str, content, run_id: str | None = None) -> None:
-    """kind: status | message | tool | error | human"""
+DATA_MAX = 2000   # per string field in `data` (tool args/output shown in the timeline)
+
+
+def _clean(v):
+    if isinstance(v, str):
+        return redact(v)[:DATA_MAX]
+    if isinstance(v, dict):
+        return {str(k): _clean(x) for k, x in list(v.items())[:30]}
+    if isinstance(v, (list, tuple)):
+        return [_clean(x) for x in list(v)[:30]]
+    return v if isinstance(v, (int, float, bool)) or v is None else redact(str(v))[:DATA_MAX]
+
+
+def emit(task_id: int, source: str, kind: str, content, run_id: str | None = None, data: dict | None = None) -> None:
+    """kind: status | message | tool | tool_result | error | human. `data` holds structured detail for the
+    timeline view: tool calls {tool, args}, tool results {tool, output, ok, seconds}, steps {step, phase, ...}."""
     text = redact(str(content))[:MAX]
     line = text if len(text) <= LOG_PREVIEW else text[:LOG_PREVIEW] + " ..."
     flow.log(logging.WARNING if kind == "error" else logging.INFO, "task=%s run=%s %s [%s] %s",
@@ -22,6 +36,8 @@ def emit(task_id: int, source: str, kind: str, content, run_id: str | None = Non
         seq = redis().incr(C.KEY_EVENT_SEQ)
         doc = {"seq": seq, "task_id": int(task_id), "run_id": run_id, "ts": now(), "source": source,
                "kind": kind, "content": text}
+        if data:
+            doc["data"] = _clean(data)
         db()[C.C_EVENTS].insert_one(doc)
         doc.pop("_id", None)
         redis().publish(f"ait:live:{task_id}", json.dumps(doc, default=str))

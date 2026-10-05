@@ -9,8 +9,10 @@ Existing projects (folders in the workspace):
 Decide:
 - title: short imperative title (max ~8 words)
 - summary: one or two sentences restating what is wanted
-- project: the existing project folder it targets; or, if it asks to create something new, a new
-  kebab-case folder name with project_is_new=true; or "general" if it targets no single project
+- project: the project folder it targets. If the task names a project that is not in the list above, still
+  give that name (kebab-case) with project_is_new=false; it may simply not be cloned yet. Set
+  project_is_new=true ONLY when the task explicitly asks to create a new project. Use "general" if it
+  targets no single project.
 - task_type: enquiry | research | development | bugfix | review | testing | planning | docs | ops |
   pr_review (review a GitHub pull request) | project_management (GitHub issues, boards, milestones, sprint reports)
 - workflow: coding (changes code/files in a project), research (investigate and report with sources),

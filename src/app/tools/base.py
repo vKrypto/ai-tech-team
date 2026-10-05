@@ -15,7 +15,7 @@ MAX_OUTPUT = 30_000
 @dataclass
 class ToolContext:
     cwd: Path                                  # the project folder (or workspace root)
-    log: Callable[[str, str], None] = lambda kind, msg: None
+    log: Callable[..., None] = lambda kind, msg, data=None: None
     changed: set = field(default_factory=set)  # workspace-relative paths written during the job
 
     def rel(self, p: Path) -> str:
@@ -31,7 +31,8 @@ def guarded(ctx: ToolContext):
         @functools.wraps(fn)
         def wrapper(*a, **kw):
             args = [repr(v)[:100] for v in a] + [f"{k}={str(v)[:100]!r}" for k, v in kw.items()]
-            ctx.log("tool", f"{fn.__name__}({', '.join(args)})")
+            call_args = {**{f"arg{i}": v for i, v in enumerate(a)}, **kw}
+            ctx.log("tool", f"{fn.__name__}({', '.join(args)})", {"tool": fn.__name__, "args": call_args})
             t0 = time.monotonic()
             try:
                 out = redact(str(fn(*a, **kw)))[:MAX_OUTPUT]
@@ -40,7 +41,13 @@ def guarded(ctx: ToolContext):
             except Exception as e:
                 out = f"ERROR: {type(e).__name__}: {e}"
             first = out.strip().splitlines()[0][:160] if out.strip() else "(empty)"
-            ctx.log("tool_result", f"{fn.__name__} → {len(out)} chars in {time.monotonic() - t0:.1f}s: {first}")
+            took = time.monotonic() - t0
+            if out.startswith("exit="):        # run_command / gh: success is exit code 0
+                ok = out.startswith("exit=0")
+            else:
+                ok = not out.startswith(("ERROR:", "DENIED:"))
+            ctx.log("tool_result", f"{fn.__name__} → {len(out)} chars in {took:.1f}s: {first}",
+                    {"tool": fn.__name__, "output": out, "ok": ok, "seconds": round(took, 2)})
             return out
         return wrapper
     return deco

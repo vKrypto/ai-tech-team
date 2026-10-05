@@ -59,7 +59,7 @@ def deliver(result: AgentResult) -> None:
 def execute(job: AgentJob) -> AgentResult:
     me = settings.host
     source = f"{job.role}@{me}"
-    log_ev = lambda kind, msg: events.emit(job.task_id, source, kind, msg, job.run_id)
+    log_ev = lambda kind, msg, data=None: events.emit(job.task_id, source, kind, msg, job.run_id, data)
     if cancellation.is_cancelled(job.task_id):
         return AgentResult(job_id=job.job_id, ok=False, cancelled=True, error="cancelled", agent=me)
     stop = threading.Event()
@@ -70,13 +70,16 @@ def execute(job: AgentJob) -> AgentResult:
             stop.wait(20)
 
     threading.Thread(target=heartbeat, daemon=True).start()
-    log_ev("status", f"picked up `{job.node}` (job {job.job_id}, tier {job.tier})")
+    log_ev("status", f"picked up `{job.node}` (job {job.job_id}, tier {job.tier})",
+           {"phase": "pickup", "step": job.node, "role": job.role, "worker": me})
     t0 = time.monotonic()
     try:
         run = factory.for_job(job).run(job, log_ev, lambda: cancellation.is_cancelled(job.task_id))
         metrics.incr("agent.jobs.ok")
         log_ev("status", f"finished `{job.node}` in {time.monotonic() - t0:.1f}s via {run.provider}/{run.model}"
-                         + (f"; asks a human: {run.needs_human.get('problem')}" if run.needs_human else ""))
+                         + (f"; asks a human: {run.needs_human.get('problem')}" if run.needs_human else ""),
+               {"phase": "finished", "step": job.node, "role": job.role, "provider": run.provider, "model": run.model,
+                "seconds": round(time.monotonic() - t0, 1)})
         return AgentResult(job_id=job.job_id, text=redact(run.text), session=run.session,
                            session_key=run.session_key, provider=run.provider, model=run.model,
                            changed_files=sorted(run.changed), needs_human=run.needs_human, agent=me,

@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#3b5bdb">
 <title>AI Team</title>
+<script defer src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%233b5bdb'/%3E%3Ccircle cx='11' cy='13' r='3' fill='white'/%3E%3Ccircle cx='21' cy='13' r='3' fill='white'/%3E%3Cpath d='M9 21c2 3 12 3 14 0' stroke='white' stroke-width='2.4' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 <style>
   :root {
@@ -117,6 +119,44 @@
   .info::after { content: ""; position: absolute; inset: -11px; }   /* 44px touch target */
   .info:hover { color: var(--accent); border-color: var(--accent); }
   .resp { margin: 0; padding-left: 18px; font-size: 14px; } .resp li { margin: 4px 0; }
+  /* rendered markdown */
+  .md { white-space: normal; font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow-wrap: anywhere; }
+  .md > :first-child { margin-top: 0; } .md > :last-child { margin-bottom: 0; }
+  .md h1, .md h2, .md h3, .md h4 { margin: 14px 0 6px; line-height: 1.3; } .md h1 { font-size: 18px; } .md h2 { font-size: 16.5px; }
+  .md h3 { font-size: 15px; } .md h4 { font-size: 14px; color: var(--muted); }
+  .md p { margin: 6px 0; } .md ul, .md ol { margin: 6px 0; padding-left: 20px; } .md li { margin: 3px 0; }
+  .md code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code); padding: 1px 5px; border-radius: 5px; }
+  .md pre { background: var(--code); padding: 10px 12px; border-radius: 10px; overflow-x: auto; white-space: pre; max-height: none; margin: 8px 0; }
+  .md pre code { background: none; padding: 0; }
+  .md blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid var(--line); color: var(--muted); }
+  .md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+  .md .tablewrap { overflow-x: auto; margin: 8px 0; }
+  .md table { border-collapse: collapse; font-size: 13px; } .md th, .md td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
+  .md th { background: var(--code); }
+  .out.md { font: inherit; white-space: normal; }
+  /* timeline */
+  .tl { position: relative; padding-left: 22px; }
+  .tl::before { content: ""; position: absolute; left: 7px; top: 8px; bottom: 8px; width: 1.5px; background: var(--line); }
+  .tl-row { position: relative; margin: 0 0 14px; min-width: 0; }
+  .tl-row > .dot { position: absolute; left: -19px; top: 6px; width: 9px; height: 9px; border-radius: 50%; background: var(--pending); box-shadow: 0 0 0 3px var(--bg); }
+  .tl-row.st-done > .dot { background: var(--done); } .tl-row.st-failed > .dot { background: var(--failed); }
+  .tl-row.st-waiting > .dot { background: var(--hold); } .tl-row.st-running > .dot { background: var(--running); animation: pulse 1.4s infinite; }
+  .tl-row.meta > .dot { width: 7px; height: 7px; left: -18px; top: 7px; }
+  .tl-head { display: flex; gap: 8px; align-items: center; min-width: 0; }
+  .tl-head b { font-size: 14.5px; }
+  .tl-children { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .tl-msg { font-size: 14px; } .tl-meta { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+  .tl-err { font-size: 13px; color: var(--failed); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .tl-human { font-size: 13.5px; color: var(--hold); font-weight: 600; white-space: pre-wrap; }
+  details.tool { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); min-width: 0; }
+  details.tool > summary { list-style: none; display: flex; gap: 8px; align-items: center; padding: 8px 10px; cursor: pointer; font-size: 13px; min-height: 40px; }
+  details.tool > summary::-webkit-details-marker { display: none; }
+  details.tool > summary b { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  .tdot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--pending); }
+  .tdot.st-done { background: var(--done); } .tdot.st-failed { background: var(--failed); } .tdot.st-running { background: var(--running); animation: pulse 1.4s infinite; }
+  .io { border-top: 1px solid var(--line); padding: 8px 10px; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 6px 8px; }
+  .io .lbl { font: 600 10.5px ui-monospace, monospace; color: var(--muted); padding-top: 9px; letter-spacing: .05em; }
+  .io pre { margin: 0; max-height: 320px; font-size: 12px; } .io pre.bad { color: var(--failed); }
   .health { display: flex; flex-wrap: wrap; gap: 6px; }
   .health span { font-size: 12px; padding: 4px 9px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); }
   .health span::before { content: "●"; margin-right: 5px; color: var(--done); }
@@ -244,6 +284,13 @@ const ago = ts => { if (!ts) return ""; const s = (Date.now() - new Date(ts)) / 
 const dur = ts => { if (!ts) return ""; const s = Math.max(0, (Date.now() - new Date(ts)) / 1000);
   const h = s / 3600 | 0, m = (s % 3600) / 60 | 0, sec = s % 60 | 0; return h ? `${h}h ${m}m` : m ? `${m}m ${sec}s` : `${sec}s`; };
 const title = t => t.title || (t.text || "").split("\n")[0].slice(0, 90);
+// Markdown → sanitized HTML (agent output must never be able to run script in your browser)
+function md(text) {
+  const src = String(text ?? "");
+  if (!window.marked || !window.DOMPurify) return `<div style="white-space:pre-wrap">${esc(src)}</div>`;
+  const html = DOMPurify.sanitize(marked.parse(src, { gfm: true, breaks: true }), { USE_PROFILES: { html: true } });
+  return html.replace(/<a /g, '<a target="_blank" rel="noopener noreferrer" ').replace(/<table>/g, '<div class="tablewrap"><table>').replace(/<\/table>/g, "</table></div>");
+}
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 2600); }
 
 class AuthError extends Error {}
@@ -264,7 +311,7 @@ const mermaid = () => mermaidP ??= import("https://cdn.jsdelivr.net/npm/mermaid@
 
 // ===================================================================== state + router
 const S = { user: null, route: "home", params: {}, meta: null, tasks: [], filter: { status: "", q: "", project: "" },
-            taskId: null, task: null, tab: "graph", events: [], lastSeq: 0, run: null, runId: null, node: null, nodeData: null,
+            taskId: null, task: null, tab: "timeline", tlRaw: false, openTools: new Set(), events: [], lastSeq: 0, run: null, runId: null, node: null, nodeData: null,
             graphKey: "", zoom: 1, choice: null, evKind: "", notes: { unread: 0, items: [] } };
 
 function parseHash() {
@@ -295,7 +342,7 @@ async function route() {
   closeSheet();
   if (h.route === "task") {
     const id = +h.id;
-    if (S.taskId !== id) Object.assign(S, { task: null, events: [], lastSeq: 0, run: null, runId: null, node: null, nodeData: null, graphKey: "", zoom: 1, choice: null, tab: "graph" });
+    if (S.taskId !== id) Object.assign(S, { task: null, events: [], lastSeq: 0, run: null, runId: null, node: null, nodeData: null, graphKey: "", zoom: 1, choice: null, tab: "timeline" });
     S.taskId = id; if (h.params.tab) S.tab = h.params.tab;
   }
   if (h.route === "tasks") S.filter.status = h.params.status || "";
@@ -462,7 +509,7 @@ async function viewTask(first) {
   renderTaskHead(); renderHold(); renderTabs();
   const key = `${S.tab}:${task.status}:${task.turn}:${S.runId}`;
   if (S.tab === "graph") await renderGraph();
-  else if (S.tab === "activity") renderActivity();
+  else if (S.tab === "timeline") S.tlRaw ? renderActivity() : renderTimeline();
   else if ($("#tabbody").dataset.key !== key || first) { $("#tabbody").dataset.key = key; S.tab === "chat" ? await renderChat() : await renderRuns(); }
 }
 
@@ -499,7 +546,7 @@ function renderHold() {
   const h = t.hold, draft = $("#holdtext")?.value || "";
   box.innerHTML = `<div class="hold"><h3>${h.kind === "error" ? "A step failed: what now?" : h.kind === "approval" ? "Approval needed" : "Your decision is needed"}</h3>
     <div class="tiny muted">step <b>${esc(h.node)}</b>${h.role ? ` · ${esc(h.role)}` : ""}</div>
-    <div style="margin:8px 0;white-space:pre-wrap">${esc(h.problem)}</div>
+    <div class="md" style="margin:8px 0">${md(h.problem)}</div>
     ${(h.options || []).map(o => `<button class="opt ${S.choice === o.id ? "on" : ""}" data-o="${esc(o.id)}"><b>${esc(o.id)}</b> · ${esc(o.label)}${o.details ? `<small>${esc(o.details)}</small>` : ""}</button>`).join("")}
     <textarea id="holdtext" placeholder="Optional: add details, or answer in your own words" style="min-height:70px;margin-top:4px"></textarea>
     <button class="primary" id="holdsend" style="width:100%;margin-top:10px;min-height:46px">Send decision</button></div>`;
@@ -512,7 +559,7 @@ function renderHold() {
 }
 
 function renderTabs() {
-  const tabs = [["graph", "Workflow"], ["chat", "Conversation"], ["activity", "Activity"], ["runs", "Runs"]];
+  const tabs = [["timeline", "Timeline"], ["graph", "Workflow"], ["chat", "Conversation"], ["runs", "Runs"]];
   $("#tabs").innerHTML = tabs.map(([k, l]) => `<button class="${S.tab === k ? "on" : ""}" data-k="${k}">${l}</button>`).join("");
   $$("#tabs button").forEach(b => b.onclick = () => {
     S.tab = b.dataset.k; S.graphKey = ""; $("#tabbody").innerHTML = ""; $("#tabbody").dataset.key = "";
@@ -584,8 +631,8 @@ function renderNodePanel() {
     <button style="margin:10px 0 4px;width:100%" id="rerun" ${canRerun ? "" : "disabled"}>↻ Re-run from ${esc(parent)}</button>
     ${canRerun ? "" : `<div class="tiny muted">Re-run is available when the task is finished or waiting for you.</div>`}
     ${st.error ? `<div class="out" style="color:var(--failed)">${esc(st.error)}</div>` : ""}
-    ${d ? (d.outputs.length ? d.outputs.map(o => `<div class="tiny muted" style="margin-top:10px">${esc(o.meta?.role || "")} on ${esc(o.meta?.agent || "")} via ${esc(o.meta?.provider || "")} · ${ago(o.ts)}</div><div class="out">${esc(o.text)}</div>`).join("")
-      : (st.output ? `<div class="out">${esc(st.output)}</div>` : `<div class="tiny muted" style="margin-top:8px">No output.</div>`)) : `<div class="tiny muted" style="margin-top:8px">Loading…</div>`}</div>`;
+    ${d ? (d.outputs.length ? d.outputs.map(o => `<div class="tiny muted" style="margin-top:10px">${esc(o.meta?.role || "")} on ${esc(o.meta?.agent || "")} via ${esc(o.meta?.provider || "")} · ${ago(o.ts)}</div><div class="out md">${md(o.text)}</div>`).join("")
+      : (st.output ? `<div class="out md">${md(st.output)}</div>` : `<div class="tiny muted" style="margin-top:8px">No output.</div>`)) : `<div class="tiny muted" style="margin-top:8px">Loading…</div>`}</div>`;
   $("#nclose").onclick = () => { S.node = null; renderGraph(); };
   $("#rerun").onclick = async () => { try { await api(`/api/runs/${S.run.id}/nodes/${encodeURIComponent(parent)}/rerun`, { method: "POST" }); toast(`Re-running from ${parent}`); refresh(); } catch (e) { fail(e); } };
 }
@@ -594,7 +641,7 @@ function renderNodePanel() {
 async function renderChat() {
   const msgs = await api(`/api/tasks/${S.task.id}/messages`);
   const finished = FINISHED.includes(S.task.status), draft = $("#followtext")?.value || "";
-  $("#tabbody").innerHTML = `<div>${msgs.map(m => `<div class="msg ${esc(m.role)}"><div class="who">${esc(m.role === "assistant" ? "team" : m.role)} · turn ${m.turn}</div>${esc(m.content)}</div>`).join("")}</div>
+  $("#tabbody").innerHTML = `<div>${msgs.map(m => `<div class="msg ${esc(m.role)}"><div class="who">${esc(m.role === "assistant" ? "team" : m.role)} · turn ${m.turn}</div>${m.role === "assistant" ? `<div class="md">${md(m.content)}</div>` : esc(m.content)}</div>`).join("")}</div>
     <div class="composer"><div class="card" style="padding:10px"><textarea id="followtext" style="min-height:60px" placeholder="${finished ? "Follow up: ask a question or request another iteration…" : "You can follow up once the task has finished."}" ${finished ? "" : "disabled"}></textarea>
     <button class="primary" id="followsend" style="width:100%;margin-top:8px" ${finished ? "" : "disabled"}>Send follow-up</button></div></div>`;
   $("#followtext").value = draft;
@@ -609,7 +656,9 @@ async function renderChat() {
 const EV_KINDS = [["", "All"], ["status", "Steps"], ["tool", "Tools"], ["message", "Agent messages"], ["human", "Human"], ["error", "Errors"]];
 function renderActivity() {
   const body = $("#tabbody");
-  if (!$("#evlog")) body.innerHTML = `<div class="chips" id="evf"></div><div class="card" style="padding:6px 12px"><div id="evlog"></div></div>`;
+  if (!$("#evlog")) body.innerHTML = `<div class="row" style="margin-bottom:8px"><span class="grow small muted">Raw activity log</span><button id="tlback">Timeline view</button></div>
+    <div class="chips" id="evf"></div><div class="card" style="padding:6px 12px"><div id="evlog"></div></div>`;
+  $("#tlback").onclick = () => { S.tlRaw = false; $("#tabbody").innerHTML = ""; renderTimeline(); };
   $("#evf").innerHTML = EV_KINDS.map(([k, l]) => `<button class="chip ${S.evKind === k ? "on" : ""}" data-k="${k}">${l}</button>`).join("");
   $$("#evf .chip").forEach(c => c.onclick = () => { S.evKind = c.dataset.k; renderActivity(); });
   const nearBottom = innerHeight + scrollY >= document.body.scrollHeight - 80;
@@ -617,6 +666,96 @@ function renderActivity() {
   const evs = S.events.filter(e => !want || e.kind === want || (want === "tool" && e.kind === "tool_result"));
   $("#evlog").innerHTML = evs.map(e => `<div class="ev ${esc(e.kind)}"><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> <span class="s">${esc(e.source)}</span> ${esc(e.content)}</div>`).join("") || `<div class="empty">No activity yet.</div>`;
   if (nearBottom) scrollTo(0, document.body.scrollHeight);
+}
+
+
+// ---- timeline (Claude-style transcript of what the agents did)
+const SKIP_STATUS = /^(dispatching to |job \S+ (ok|failed) after|picked up `|finished `)/;
+function buildTimeline(events) {
+  const items = [], tools = {};
+  let step = null;
+  const child = it => (step ? step.children : items).push(it);
+  for (const e of events) {
+    const d = e.data || {}, src = e.source || "";
+    if (d.phase === "start") { step = { type: "step", step: d.step, status: "running", ts: e.ts, children: [] }; items.push(step); continue; }
+    if (["done", "failed", "waiting"].includes(d.phase)) {
+      const st = [...items].reverse().find(i => i.type === "step" && i.step === d.step);
+      if (st) { st.status = d.phase; st.seconds = d.seconds; if (d.error) st.children.push({ type: "error", text: d.error }); }
+      if (step && step.step === d.step && d.phase !== "waiting") step = null;
+      if (d.phase === "waiting") items.push({ type: "human", text: e.content });
+      continue;
+    }
+    if (d.phase === "pickup" && step) { step.role = d.role; step.worker = d.worker; continue; }
+    if (d.phase === "provider" && step) { step.provider = `${d.provider}${d.model ? "/" + d.model : ""}`; continue; }
+    if (d.phase === "finished" && step) { step.agentSeconds = d.seconds; continue; }
+    if (e.kind === "tool") { const t = { type: "tool", seq: e.seq, tool: d.tool || (e.content.match(/^[\w.-]+/) || ["tool"])[0], args: d.args, summary: e.content, ts: e.ts, src };
+      child(t); if (d.id) tools[d.id] = t; continue; }
+    if (e.kind === "tool_result") {
+      const scope = step ? step.children : items;
+      const t = (d.id && tools[d.id]) || [...scope].reverse().find(x => x.type === "tool" && !x.result && x.src === src);
+      if (t) t.result = { output: d.output ?? e.content, ok: d.ok !== false, seconds: d.seconds };
+      continue;
+    }
+    if (e.kind === "message") { const last = (step ? step.children : items).at(-1);
+      if (!(last && last.type === "msg" && last.text === e.content)) child({ type: "msg", text: e.content, src }); continue; }
+    if (e.kind === "error") { child({ type: "error", text: e.content }); continue; }
+    if (e.kind === "human") { items.push({ type: "human", text: e.content, src }); continue; }
+    if (src.startsWith("engine/") && SKIP_STATUS.test(e.content)) continue;
+    if (SKIP_STATUS.test(e.content)) continue;
+    child({ type: "meta", text: e.content, src, ts: e.ts });
+  }
+  return items;
+}
+const argText = a => {
+  if (a == null) return "";
+  if (typeof a !== "object") return String(a);
+  if (a.command) return a.command;
+  const keys = Object.keys(a);
+  if (keys.length === 1 && typeof a[keys[0]] === "string") return a[keys[0]];
+  return JSON.stringify(a, null, 2);
+};
+const argPreview = t => { const a = t.args; const v = a && (a.command || a.file_path || a.path || a.url || a.query || a.pattern || a.arg0 || a.args);
+  return (v ? String(v) : t.summary.replace(/^[\w.-]+\(/, "").replace(/\)$/, "")).split("\n")[0].slice(0, 140); };
+function tlTool(t) {
+  const st = !t.result ? "running" : t.result.ok ? "done" : "failed";
+  const open = S.openTools.has(t.seq);
+  return `<details class="tool" data-seq="${t.seq}" ${open ? "open" : ""}><summary>
+      <i class="tdot st-${st}"></i><b>${esc(t.tool)}</b><span class="muted ellipsis grow">${esc(argPreview(t))}</span>
+      ${t.result?.seconds != null ? `<span class="tiny muted">${t.result.seconds}s</span>` : ""}</summary>
+    <div class="io"><div class="lbl">IN</div><pre>${esc(argText(t.args) || t.summary)}</pre>
+      <div class="lbl">OUT</div><pre class="${t.result && !t.result.ok ? "bad" : ""}">${t.result ? esc(t.result.output || "(empty)") : "running…"}</pre></div></details>`;
+}
+function tlChild(c) {
+  if (c.type === "tool") return tlTool(c);
+  if (c.type === "msg") return `<div class="tl-msg md">${md(c.text)}</div>`;
+  if (c.type === "error") return `<div class="tl-err">${esc(c.text)}</div>`;
+  return `<div class="tl-meta">${esc(c.text)}</div>`;
+}
+function renderTimeline() {
+  const body = $("#tabbody");
+  if (!$("#tl")) body.innerHTML = `<div class="row" style="margin-bottom:10px"><span class="grow small muted">What the team did, step by step</span><button id="tlraw">Raw log</button></div><div class="tl" id="tl"></div>`;
+  $("#tlraw").onclick = () => { S.tlRaw = true; $("#tabbody").innerHTML = ""; renderActivity(); };
+  const nearBottom = innerHeight + scrollY >= document.body.scrollHeight - 120;
+  const items = buildTimeline(S.events);
+  $("#tl").innerHTML = items.map(it => {
+    if (it.type === "step") {
+      const label = { running: "running", done: "done", failed: "failed", waiting: "needs you" }[it.status];
+      const secs = it.seconds != null ? ` · ${it.seconds}s` : it.status === "running" ? ` · ${dur(it.ts)}` : "";
+      return `<div class="tl-row st-${it.status}"><i class="dot"></i>
+        <div class="tl-head"><b>${esc(it.step)}</b>${it.role ? `<span class="badge" style="--c:var(--accent)">${esc(it.role)}</span>` : ""}
+          <span class="tiny muted grow ellipsis">${esc([it.provider, it.worker].filter(Boolean).join(" · "))}</span>
+          <span class="tiny muted">${label}${secs}</span></div>
+        ${it.children.length ? `<div class="tl-children">${it.children.map(tlChild).join("")}</div>` : ""}</div>`;
+    }
+    if (it.type === "human") return `<div class="tl-row st-waiting"><i class="dot"></i><div class="tl-human">${esc(it.text)}</div></div>`;
+    if (it.type === "error") return `<div class="tl-row st-failed"><i class="dot"></i><div class="tl-err">${esc(it.text)}</div></div>`;
+    if (it.type === "msg") return `<div class="tl-row"><i class="dot"></i><div class="tl-msg md">${md(it.text)}</div></div>`;
+    if (it.type === "tool") return `<div class="tl-row"><i class="dot"></i>${tlTool(it)}</div>`;
+    return `<div class="tl-row meta"><i class="dot"></i><div class="tl-meta"><b>${esc(it.src)}</b> ${esc(it.text)}</div></div>`;
+  }).join("") || `<div class="empty">Nothing yet. Steps appear here as the team works.</div>`;
+  $$("#tl details.tool").forEach(d => d.addEventListener("toggle", () => {
+    const k = +d.dataset.seq; d.open ? S.openTools.add(k) : S.openTools.delete(k); }));
+  if (nearBottom && S.task && ACTIVE.includes(S.task.status)) scrollTo(0, document.body.scrollHeight);
 }
 
 // ---- runs

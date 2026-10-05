@@ -24,4 +24,4 @@ def understand(text: str, projects: list[str], context: str = "", hint: str | No
         log.warning("understanding failed on every provider, using heuristics: %s", e)
         on_fallback(None, e)
         u, used = TaskUnderstanding.heuristic(prompt), "heuristic"
-    return normalize(u, projects, hint), used
+    return normalize(u, projects, hint, text), used

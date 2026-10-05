@@ -38,7 +38,7 @@ class AgentRequest:
     session: str | None = None                   # this provider's session for this role, if any
     tool_groups: list[str] = field(default_factory=list)
     request: str = ""                            # original task text (mock + logs)
-    log: Callable[[str, str], None] = lambda kind, msg: None
+    log: Callable[..., None] = lambda kind, msg, data=None: None
     cancelled: Callable[[], bool] = lambda: False
     changed: set = field(default_factory=set)
 

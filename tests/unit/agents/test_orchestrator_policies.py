@@ -15,9 +15,11 @@ def test_heuristic_routes_by_keywords():
     assert (r.workflow, r.task_type, r.project) == ("task_execution", "enquiry", "shop")
 
 
-def test_unknown_project_becomes_general_and_coding_needs_a_project():
+def test_unknown_project_keeps_its_name_and_coding_needs_a_project():
     out = normalize(u(project="nope"), ["shop"])
-    assert out.project == "general" and out.workflow == "task_execution"
+    assert out.project == "nope" and out.project_is_new is False        # kept: the workflow asks the human
+    out = normalize(u(project="Not A Valid Name!"), ["shop"])
+    assert out.project == "general" and out.workflow == "task_execution"  # coding needs a real project
 
 
 def test_new_project_kept_and_hint_wins():
@@ -30,3 +32,12 @@ def test_heuristic_parses_triage_prompt():
     prompt = render("triage", projects="- shop\n- blog", context="", text="add search to blog")
     r = TaskUnderstanding.heuristic(prompt)
     assert r.project == "blog" and r.workflow == "coding"
+
+
+def test_named_but_missing_project_is_not_new_unless_asked():
+    out = normalize(u(project="job-seeker", project_is_new=True), ["shop"], text="In project job-seeker, change the alerts")
+    assert out.project == "job-seeker" and out.project_is_new is False
+    out = normalize(u(project="todo-app", project_is_new=False), ["shop"], text="Create a new project todo-app with FastAPI")
+    assert out.project_is_new is True
+    out = normalize(u(project="todo-app"), ["shop"], text="build a todo app from scratch")
+    assert out.project_is_new is True

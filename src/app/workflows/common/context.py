@@ -38,7 +38,8 @@ def tracked(name: str, fn):
                               "options": [{"id": "approve", "label": "Approve", "details": "Run the step"},
                                           {"id": "reject", "label": "Reject", "details": "Stop the task"}]}}
         runs.node_start(ctx.run_id, name)
-        events.emit(ctx.task_id, f"engine/{name}", "status", f"▶ step `{name}` started", ctx.run_id)
+        events.emit(ctx.task_id, f"engine/{name}", "status", f"▶ step `{name}` started", ctx.run_id,
+                    {"step": name, "phase": "start"})
         t0 = time.monotonic()
         attempts = int(pol.get("node_retries", 1)) + 1
         for attempt in range(attempts):
@@ -63,19 +64,22 @@ def tracked(name: str, fn):
                     runs.node_fail(ctx.run_id, name, msg)
                     events.emit(ctx.task_id, f"engine/{name}", "error",
                                 f"✗ step `{name}` failed after {attempts} attempt(s) in {time.monotonic() - t0:.1f}s",
-                                ctx.run_id)
+                                ctx.run_id, {"step": name, "phase": "failed", "seconds": round(time.monotonic() - t0, 1),
+                                             "error": msg})
                     return {"error": {"node": name, "message": msg[:3000]}}
         took = time.monotonic() - t0
         if updates.get("human"):
             runs.node_wait(ctx.run_id, name, updates["human"].get("problem", ""))
             events.emit(ctx.task_id, f"engine/{name}", "human",
-                        f"⏸ step `{name}` needs a human ({took:.1f}s): {updates['human'].get('problem', '')}", ctx.run_id)
+                        f"⏸ step `{name}` needs a human ({took:.1f}s): {updates['human'].get('problem', '')}", ctx.run_id,
+                        {"step": name, "phase": "waiting", "seconds": round(took, 1)})
         elif updates.get("error") or updates.get("failed"):
             pass  # recorded above / by the node itself
         else:
             out = (updates.get("outputs") or {}).get(name)
             runs.node_done(ctx.run_id, name, out)
-            events.emit(ctx.task_id, f"engine/{name}", "status", f"✓ step `{name}` done in {took:.1f}s", ctx.run_id)
+            events.emit(ctx.task_id, f"engine/{name}", "status", f"✓ step `{name}` done in {took:.1f}s", ctx.run_id,
+                        {"step": name, "phase": "done", "seconds": round(took, 1)})
         return updates
     return node
 
