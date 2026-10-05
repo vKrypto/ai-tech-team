@@ -681,6 +681,20 @@ async function renderChat() {
 }
 
 // ---- activity
+// Events recorded before structured data existed: recover step/tool info from their text
+function normEvent(e) {
+  if (e.data && Object.keys(e.data).length) return e;
+  const c = e.content || "", d = {};
+  let m;
+  if ((m = c.match(/^▶ step `(.+?)` started/))) Object.assign(d, { step: m[1], phase: "start" });
+  else if ((m = c.match(/^✓ step `(.+?)` done in ([\d.]+)s/))) Object.assign(d, { step: m[1], phase: "done", seconds: +m[2] });
+  else if ((m = c.match(/^✗ step `(.+?)`.* in ([\d.]+)s/))) Object.assign(d, { step: m[1], phase: "failed", seconds: +m[2] });
+  else if ((m = c.match(/^⏸ step `(.+?)` needs a human \(([\d.]+)s\)/))) Object.assign(d, { step: m[1], phase: "waiting", seconds: +m[2] });
+  else if ((m = c.match(/^picked up `(.+?)`/))) Object.assign(d, { step: m[1], phase: "pickup", role: (e.source || "").split("@")[0], worker: (e.source || "").split("@")[1] });
+  else if (e.kind === "tool" && (m = c.match(/^([\w.-]+)\(/))) d.tool = m[1];
+  else if (e.kind === "tool_result" && (m = c.match(/^([\w.-]+) → .*?in ([\d.]+)s: (.*)$/s))) Object.assign(d, { tool: m[1], seconds: +m[2], output: m[3], ok: !/^(ERROR|DENIED)|^exit=[1-9]/.test(m[3]) });
+  return Object.keys(d).length ? { ...e, data: d } : e;
+}
 const EV_KINDS = [["", "All"], ["step", "Steps"], ["tool", "Tools"], ["message", "Messages"], ["human", "Human"], ["error", "Errors"]];
 const ROUTINE = /^(dispatching to |job \S+ (ok|failed) after|picked up `|resuming (conversation|claude session|codex session))/;
 function srcChip(src) {
@@ -725,7 +739,7 @@ function renderActivity() {
   const openRows = new Set($$("#evlog .lrow.open").map(r => r.dataset.seq));
   const nearBottom = innerHeight + scrollY >= document.body.scrollHeight - 80;
   const time = ts => new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const rows = buildLog(S.events).filter(r => {
+  const rows = buildLog(S.events.map(normEvent)).filter(r => {
     if (r.t === "divider") return !want || want === "step";
     if (r.routine && !S.evRoutine) return false;
     const kind = r.t === "tool" ? "tool" : r.kind;
@@ -822,7 +836,7 @@ function renderTimeline() {
   if (!$("#tl")) body.innerHTML = `<div class="row" style="margin-bottom:10px"><span class="grow small muted">What the team did, step by step</span><button id="tlraw">Activity log</button></div><div class="tl" id="tl"></div>`;
   $("#tlraw").onclick = () => { S.tlRaw = true; $("#tabbody").innerHTML = ""; renderActivity(); };
   const nearBottom = innerHeight + scrollY >= document.body.scrollHeight - 120;
-  const items = buildTimeline(S.events);
+  const items = buildTimeline(S.events.map(normEvent));
   $("#tl").innerHTML = items.map(it => {
     if (it.type === "step") {
       const label = { running: "running", done: "done", failed: "failed", waiting: "needs you" }[it.status];
