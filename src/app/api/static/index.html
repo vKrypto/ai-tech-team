@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Team</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #fff; --text: #1b2230; --muted: #687385; --line: #e1e5eb; --accent: #3b5bdb; --code: #f1f3f5;
+    --created: #868e96; --queued: #ae3ec9; --processing: #1c7ed6; --hold: #f08c00; --done: #2f9e44; --failed: #e03131; --cancelled: #495057;
+    --pending: #ced4da;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #101317; --panel: #191d23; --text: #e6e9ee; --muted: #8b95a5; --line: #2a3039; --accent: #748ffc; --code: #22272e; --pending: #3a414b; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 14px; padding: 10px 18px; background: var(--panel); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; }
+  nav { display: flex; gap: 4px; }
+  nav button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .svc { display: flex; gap: 6px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .svc span { border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; }
+  .svc span.up::before { content: "●"; color: var(--done); margin-right: 4px; }
+  .svc span.down::before { content: "●"; color: var(--failed); margin-right: 4px; }
+  .grow { flex: 1; }
+  .bell { position: relative; }
+  .bell b { position: absolute; top: -6px; right: -6px; background: var(--failed); color: #fff; border-radius: 999px; font-size: 10px; padding: 1px 5px; }
+  main { padding: 14px 18px; }
+  .cols { display: grid; grid-template-columns: minmax(340px, 0.85fr) 1.5fr; gap: 14px; height: calc(100vh - 80px); }
+  .col { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .scroll { overflow-y: auto; min-height: 0; flex: 1; }
+  textarea, input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  textarea { width: 100%; min-height: 64px; resize: vertical; }
+  button { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 5px 11px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.warn { border-color: var(--failed); color: var(--failed); }
+  button:disabled { opacity: .45; cursor: default; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; font-size: 12px; cursor: pointer; background: var(--panel); }
+  .chip.on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .badge { font-size: 11px; padding: 1px 8px; border-radius: 999px; color: #fff; white-space: nowrap; }
+  .task { padding: 9px 11px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .task:hover, .task.sel { background: var(--bg); }
+  .task.sel { box-shadow: inset 3px 0 0 var(--accent); }
+  .task .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task .m { color: var(--muted); font-size: 12px; display: flex; gap: 9px; flex-wrap: wrap; margin-top: 2px; }
+  .kv { display: grid; grid-template-columns: 96px 1fr; gap: 3px 12px; font-size: 13px; margin: 8px 0; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+  .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-top: 6px; }
+  .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); }
+  .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+  pre, .out { white-space: pre-wrap; word-break: break-word; background: var(--code); padding: 10px; border-radius: 8px; font: 12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 6px 0; max-height: 420px; overflow: auto; }
+  .hold { border: 1px solid var(--hold); background: color-mix(in srgb, var(--hold) 9%, var(--panel)); border-radius: 10px; padding: 12px; margin: 10px 0; }
+  .hold h3 { margin: 0 0 6px; font-size: 14px; color: var(--hold); }
+  .opt { display: block; width: 100%; text-align: left; margin: 5px 0; }
+  .opt small { display: block; color: var(--muted); }
+  .opt.on { border-color: var(--hold); box-shadow: inset 0 0 0 1px var(--hold); }
+  .graph { display: grid; grid-template-columns: 1fr 300px; gap: 12px; margin-top: 10px; }
+  .graph .svgbox { overflow: auto; background: var(--bg); border-radius: 8px; padding: 8px; min-height: 260px; }
+  .graph .svgbox svg { max-width: none !important; height: auto; }
+  .graph .svgbox .node { cursor: pointer; }
+  .legend { display: flex; gap: 10px; font-size: 11px; color: var(--muted); flex-wrap: wrap; margin-top: 6px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: -1px; }
+  .ev { font: 12px/1.4 ui-monospace, monospace; padding: 3px 0; border-bottom: 1px dashed var(--line); white-space: pre-wrap; word-break: break-word; }
+  .ev .s { font-weight: 700; } .ev.tool, .ev.tool_result { color: var(--muted); } .ev.tool_result { padding-left: 18px; } .ev.error { color: var(--failed); } .ev.human { color: var(--hold); }
+  .msg { padding: 8px 10px; border-radius: 10px; margin: 6px 0; white-space: pre-wrap; word-break: break-word; font-size: 13px; max-width: 94%; }
+  .msg .who { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 2px; }
+  .msg.user { margin-left: auto; background: color-mix(in srgb, var(--accent) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); }
+  .msg.assistant { background: var(--code); border: 1px solid var(--line); max-height: 380px; overflow: auto; }
+  .msg.system { color: var(--muted); font-style: italic; }
+  .empty { color: var(--muted); padding: 24px; text-align: center; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; }
+  .drawer { position: fixed; top: 0; right: 0; width: min(440px, 100vw); height: 100vh; background: var(--panel); border-left: 1px solid var(--line); box-shadow: -8px 0 24px rgba(0,0,0,.15); padding: 14px; overflow-y: auto; z-index: 10; }
+  .note { border-bottom: 1px solid var(--line); padding: 9px 0; }
+  .note.unread .nt { font-weight: 700; }
+  .note .nt { cursor: pointer; }
+  .muted { color: var(--muted); } .small { font-size: 12px; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; height: auto; } .graph { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>AI Team</h1>
+  <nav id="nav"></nav>
+  <div class="svc" id="svc"></div>
+  <div class="grow"></div>
+  <button class="bell" id="bell" title="Notifications">🔔<b id="unread" hidden></b></button>
+</header>
+<main id="main"></main>
+<div class="drawer" id="drawer" hidden></div>
+
+<script type="module">
+import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+const dark = window.__dark;
+mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "default", securityLevel: "loose", flowchart: { curve: "basis", useMaxWidth: false } });
+window.__mermaid = mermaid;
+window.dispatchEvent(new Event("mermaid-ready"));
+</script>
+<script>
+const dark = window.__dark = matchMedia("(prefers-color-scheme: dark)").matches;
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const api = async (path, opts = {}) => {
+  const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  if (!r.ok) { let d = await r.text(); try { d = JSON.parse(d).detail; } catch {} throw new Error(typeof d === "string" ? d : JSON.stringify(d)); }
+  return r.status === 204 ? null : r.json();
+};
+const ago = ts => { if (!ts) return ""; const s = (Date.now() - new Date(ts)) / 1000; return s < 60 ? `${s | 0}s ago` : s < 3600 ? `${s / 60 | 0}m ago` : s < 86400 ? `${s / 3600 | 0}h ago` : new Date(ts).toLocaleString(); };
+const COLOR = { created: "created", queued: "queued", processing: "processing", "hold:human_required": "hold", done: "done", failed: "failed", cancelled: "cancelled" };
+const badge = st => `<span class="badge" style="background:var(--${COLOR[st] || "created"})">${esc(st === "hold:human_required" ? "hold · human" : st)}</span>`;
+const ACTIVE = ["created", "queued", "processing"];
+const NODE_FILL = { running: "#1c7ed6", done: "#2f9e44", failed: "#e03131", waiting: "#f08c00", pending: dark ? "#3a414b" : "#ced4da" };
+
+const S = { view: "tasks", filter: { status: "", q: "", project: "" }, tasks: [], meta: null, sel: null, task: null, tab: "graph",
+            events: [], lastSeq: 0, runs: [], runId: null, run: null, node: null, nodeData: null, graphKey: "", choice: null };
+
+// ---------- shell ----------
+function renderNav() {
+  $("#nav").innerHTML = ["tasks", "schedules", "system"].map(v => `<button class="${S.view === v ? "on" : ""}" data-v="${v}">${v[0].toUpperCase() + v.slice(1)}</button>`).join("");
+  $("#nav").querySelectorAll("button").forEach(b => b.onclick = () => { S.view = b.dataset.v; render(); });
+}
+function renderServices() {
+  const m = S.meta; if (!m) return;
+  const kinds = ["scheduler", "orchestrator", "engine", "agent", "notifier"];
+  $("#svc").innerHTML = kinds.map(k => { const n = m.services.filter(s => s.kind === k).length;
+    return `<span class="${n ? "up" : "down"}" title="${esc(m.services.filter(s => s.kind === k).map(s => s.host).join(", "))}">${k}${n > 1 ? " ×" + n : ""}</span>`; }).join("")
+    + `<span title="enabled providers">⚡ ${esc(m.providers.filter(p => p.enabled).map(p => p.name).join(", ") || "no provider")}</span>`;
+}
+function render() { renderNav(); renderServices(); ({ tasks: renderTasksView, schedules: renderSchedules, system: renderSystem })[S.view](); }
+
+// ---------- tasks view ----------
+function renderTasksView() {
+  if (!$("#tasksview")) {
+    $("#main").innerHTML = `<div class="cols" id="tasksview">
+      <div class="col">
+        <div class="card">
+          <textarea id="newtext" placeholder="Describe a task in plain words… (Ctrl+Enter to submit)"></textarea>
+          <div class="row" style="margin-top:6px"><select id="newproj"><option value="">project: let the orchestrator decide</option></select>
+          <div class="grow"></div><button class="primary" id="submit">Submit task</button></div>
+          <div class="small muted" id="submitmsg"></div>
+        </div>
+        <div class="card"><div class="chips" id="statuschips"></div>
+          <div class="row" style="margin-top:8px"><input id="q" type="search" placeholder="search" style="flex:1">
+          <select id="fproj"><option value="">all projects</option></select></div></div>
+        <div class="card scroll" id="list" style="padding:0"></div>
+      </div>
+      <div class="col"><div class="card scroll" id="detail"></div></div>
+    </div>`;
+    $("#submit").onclick = submitTask;
+    $("#newtext").onkeydown = e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submitTask(); };
+    $("#q").oninput = e => { S.filter.q = e.target.value; loadTasks(); };
+    $("#fproj").onchange = e => { S.filter.project = e.target.value; loadTasks(); };
+  }
+  const m = S.meta;
+  if (m) {
+    const opts = m.projects.map(p => `<option>${esc(p)}</option>`).join("");
+    if ($("#newproj").options.length !== m.projects.length + 1) $("#newproj").innerHTML = `<option value="">project: let the orchestrator decide</option>` + opts;
+    if ($("#fproj").options.length !== m.projects.length + 1) { const v = $("#fproj").value; $("#fproj").innerHTML = `<option value="">all projects</option>` + opts; $("#fproj").value = v; }
+    const total = Object.values(m.counts).reduce((a, b) => a + b, 0);
+    $("#statuschips").innerHTML = [["", "all", total], ...m.statuses.map(s => [s, s === "hold:human_required" ? "hold" : s, m.counts[s] || 0])]
+      .map(([v, l, n]) => `<span class="chip ${S.filter.status === v ? "on" : ""}" data-s="${esc(v)}">${v ? `<i style="display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--${COLOR[v]})"></i> ` : ""}${esc(l)} <b>${n}</b></span>`).join("");
+    $("#statuschips").querySelectorAll(".chip").forEach(c => c.onclick = () => { S.filter.status = c.dataset.s; loadTasks(); renderTasksView(); });
+  }
+  renderList();
+  renderDetail();
+}
+
+function renderList() {
+  const list = $("#list"); if (!list) return;
+  list.innerHTML = S.tasks.length ? S.tasks.map(t => `<div class="task ${t.id === S.sel ? "sel" : ""}" data-id="${t.id}">
+      <div class="row"><span class="t" style="flex:1">#${t.id} ${esc(t.title || t.text)}</span>${badge(t.status)}</div>
+      <div class="m"><span>${esc(t.project || "…")}</span><span>${esc(t.task_type || "")}</span><span>${esc(t.workflow || "")}</span>
+      ${t.turn > 1 ? `<span>turn ${t.turn}</span>` : ""}<span>${esc(t.source)}</span><span>${ago(t.updated_at)}</span></div></div>`).join("")
+    : `<div class="empty">No tasks yet.</div>`;
+  list.querySelectorAll(".task").forEach(el => el.onclick = () => select(+el.dataset.id));
+}
+
+async function submitTask() {
+  const text = $("#newtext").value.trim(); if (!text) return;
+  $("#submit").disabled = true;
+  try { const t = await api("/api/tasks", { method: "POST", body: { text, project: $("#newproj").value || null } });
+    $("#newtext").value = ""; $("#submitmsg").textContent = ""; await loadTasks(); select(t.id);
+  } catch (e) { $("#submitmsg").textContent = e.message; }
+  $("#submit").disabled = false;
+}
+
+async function select(id) {
+  S.sel = id; S.events = []; S.lastSeq = 0; S.runId = null; S.run = null; S.node = null; S.nodeData = null; S.graphKey = ""; S.choice = null;
+  location.hash = "task=" + id;
+  await loadTask(); renderTasksView();
+}
+
+function renderDetail() {
+  const el = $("#detail"); if (!el) return;
+  const t = S.task;
+  if (!t) { el.innerHTML = `<div class="empty">Select a task, or submit one.</div>`; return; }
+  const meta = t.metadata || {};
+  const active = ACTIVE.includes(t.status);
+  const finished = ["done", "failed", "cancelled"].includes(t.status);
+  if (!$("#dhead") || el.dataset.id != t.id) {
+    el.dataset.id = t.id;
+    el.innerHTML = `<div id="dhead"></div><div id="dhold"></div>
+      <div class="tabs" id="dtabs"></div><div id="dbody"></div>`;
+  }
+  renderHead();
+  renderHold();
+  const tabs = [["graph", "Workflow"], ["chat", "Conversation"], ["activity", "Activity"], ["runs", `Runs`]];
+  $("#dtabs").innerHTML = tabs.map(([k, l]) => `<button class="${S.tab === k ? "on" : ""}" data-k="${k}">${l}</button>`).join("");
+  $("#dtabs").querySelectorAll("button").forEach(b => b.onclick = () => { S.tab = b.dataset.k; S.graphKey = ""; renderDetail(); });
+  ({ graph: renderGraphTab, chat: renderChat, activity: renderActivity, runs: renderRuns })[S.tab](finished);
+}
+
+function renderHead() {
+  const t = S.task, meta = t.metadata || {};
+  const active = ACTIVE.includes(t.status);
+  $("#dhead").innerHTML = `<div class="row"><h2 style="margin:0;font-size:16px;flex:1">#${t.id} ${esc(t.title || t.text.slice(0, 80))}</h2>${badge(t.status)}</div>
+    <dl class="kv">
+      <dt>project</dt><dd>${esc(t.project || "…")}${meta.project_is_new ? " (new)" : ""}</dd>
+      <dt>type</dt><dd>${esc(t.task_type || "…")} · workflow <b>${esc(t.workflow || "…")}</b> · tier ${esc(meta.model_tier || "…")}</dd>
+      <dt>routing</dt><dd class="muted">${esc(meta.rationale || "")}${meta.understood_by ? ` <span class="small">(by ${esc(meta.understood_by)})</span>` : ""}</dd>
+      <dt>source</dt><dd>${esc(t.source)}${t.source_ref ? ` · ${esc(t.source_ref)}` : ""} · turn ${t.turn} · attempt ${t.attempt} · run ${esc(t.run_id || "—")}</dd>
+      ${t.changed_files?.length ? `<dt>files</dt><dd>${t.changed_files.map(esc).join(", ")}</dd>` : ""}
+      ${t.error ? `<dt>error</dt><dd style="color:var(--failed)">${esc(t.error)}</dd>` : ""}
+    </dl>
+    <div class="row">
+      <button class="warn" id="bcancel" ${active || t.status.startsWith("hold") ? "" : "disabled"}>Cancel</button>
+      <button id="bretry" ${["failed", "cancelled"].includes(t.status) ? "" : "disabled"}>Retry</button>
+    </div>`;
+  $("#bcancel").onclick = () => act(`/api/tasks/${t.id}/cancel`);
+  $("#bretry").onclick = () => act(`/api/tasks/${t.id}/retry`);
+}
+
+function renderHold() {
+  const t = S.task, box = $("#dhold");
+  if (t.status !== "hold:human_required" || !t.hold) { box.innerHTML = ""; box.dataset.key = ""; return; }
+  if (box.dataset.key === JSON.stringify(t.hold) + S.choice) return;
+  box.dataset.key = JSON.stringify(t.hold) + S.choice;
+  const h = t.hold;
+  box.innerHTML = `<div class="hold"><h3>${h.kind === "error" ? "A step failed: decide what to do" : h.kind === "approval" ? "Approval required" : "Human decision required"}</h3>
+    <div class="small muted">step <b>${esc(h.node)}</b>${h.role ? ` · ${esc(h.role)}` : ""}</div>
+    <div style="margin:6px 0;white-space:pre-wrap">${esc(h.problem)}</div>
+    ${(h.options || []).map(o => `<button class="opt ${S.choice === o.id ? "on" : ""}" data-o="${esc(o.id)}"><b>${esc(o.id)}</b> · ${esc(o.label)}${o.details ? `<small>${esc(o.details)}</small>` : ""}</button>`).join("")}
+    <textarea id="holdtext" placeholder="Optional: add details or answer in your own words"></textarea>
+    <div class="row" style="margin-top:6px"><button class="primary" id="holdsend">Send decision</button><span class="small" id="holdmsg"></span></div></div>`;
+  box.querySelectorAll(".opt").forEach(b => b.onclick = () => { S.choice = b.dataset.o; renderHold(); });
+  $("#holdsend").onclick = async () => {
+    try { await api(`/api/tasks/${t.id}/answer`, { method: "POST", body: { option: S.choice, text: $("#holdtext").value || null } });
+      S.choice = null; await refreshSelected(); } catch (e) { $("#holdmsg").textContent = e.message; }
+  };
+}
+
+async function act(path) { try { await api(path, { method: "POST" }); await refreshSelected(); } catch (e) { alertBar(e.message); } }
+function alertBar(msg) { const d = $("#submitmsg"); if (d) d.textContent = msg; }
+
+// ---------- graph ----------
+async function renderGraphTab(finished) {
+  const body = $("#dbody");
+  const run = S.run;
+  if (!run) { body.innerHTML = `<div class="empty">${S.task.run_id ? "Loading…" : "No workflow run yet (the orchestrator is routing the task)."}</div>`; return; }
+  const statuses = Object.fromEntries(Object.entries(run.nodes || {}).map(([k, v]) => [k, v.status]));
+  const key = run.id + JSON.stringify(statuses) + S.node;
+  if (!$("#svgbox") || $("#svgbox").dataset.run !== run.id) {
+    body.innerHTML = `<div class="graph"><div><div class="svgbox" id="svgbox" data-run="${esc(run.id)}"></div>
+      <div class="legend">${Object.entries(NODE_FILL).map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join("")}
+      <span>· run ${esc(run.id)} (${esc(run.workflow)}) ${esc(run.status)}</span></div></div><div id="nodepanel"></div></div>`;
+    S.graphKey = "";
+  }
+  renderNodePanel(finished);
+  if (S.graphKey === key) return;
+  S.graphKey = key;
+  if (!window.__mermaid) { window.addEventListener("mermaid-ready", () => { S.graphKey = ""; renderDetail(); }, { once: true });
+    $("#svgbox").innerHTML = `<pre>${esc(run.mermaid)}</pre>`; return; }
+  const ids = [...run.mermaid.matchAll(/^\s+([A-Za-z0-9_]+)\(/gm)].map(m => m[1]);
+  const cls = Object.keys(NODE_FILL).map(s => `  classDef st_${s} fill:${NODE_FILL[s]},color:${s === "pending" ? "inherit" : "#fff"},stroke:${NODE_FILL[s]}`);
+  const assign = ids.map(id => { const st = statuses[id.split("__").pop()] || "pending"; return `  class ${id} st_${st}`; });
+  const sel = S.node ? [`  style ${S.node} stroke-width:4px,stroke:#fab005`] : [];
+  try {
+    const { svg, bindFunctions } = await window.__mermaid.render("g" + Date.now(), [run.mermaid, ...cls, ...assign, ...sel].join("\n"));
+    const box = $("#svgbox"); if (!box) return;
+    box.innerHTML = svg; bindFunctions?.(box);
+    box.querySelectorAll("g.node").forEach(g => {
+      const m = g.id.match(/flowchart-(.+)-\d+$/); if (!m) return;
+      g.onclick = () => { S.node = m[1]; S.nodeData = null; loadNode(); renderDetail(); };
+    });
+  } catch (e) { $("#svgbox").innerHTML = `<pre>${esc(e.message)}\n\n${esc(run.mermaid)}</pre>`; }
+}
+
+async function loadNode() {
+  if (!S.node || !S.run) return;
+  const name = S.node.split("__").pop();
+  S.nodeData = await api(`/api/runs/${S.run.id}/nodes/${encodeURIComponent(name)}`).catch(() => null);
+  renderNodePanel();
+}
+
+function renderNodePanel(finished) {
+  const p = $("#nodepanel"); if (!p) return;
+  if (!S.node) { p.innerHTML = `<div class="muted small">Click a step to see its output${S.run?.rerunnable ? " or re-run the workflow from there" : ""}.</div>`; return; }
+  const name = S.node.split("__").pop(), parent = S.node.includes("__") ? S.node.split("__")[0] : name;
+  const st = (S.run.nodes || {})[name] || {}, d = S.nodeData;
+  const t = S.task;
+  const canRerun = (S.run.rerunnable || []).includes(parent) && !ACTIVE.includes(t.status) && t.run_id === S.run.id;
+  p.innerHTML = `<div class="row"><b style="flex:1">${esc(name)}</b><span class="badge" style="background:${NODE_FILL[st.status] || NODE_FILL.pending}">${esc(st.status || "pending")}</span></div>
+    <div class="small muted">attempts ${st.attempts || 0}${st.started_at ? ` · ${ago(st.started_at)}` : ""}</div>
+    <button style="margin:8px 0" id="rerun" ${canRerun ? "" : "disabled"} title="${canRerun ? "" : "available when the task is finished or on hold, on its latest run"}">↻ Re-run from ${esc(parent)}</button>
+    ${st.error ? `<div class="out" style="color:var(--failed)">${esc(st.error)}</div>` : ""}
+    ${d ? (d.outputs.length ? d.outputs.map(o => `<div class="small muted">${esc(o.meta?.role || "")} @ ${esc(o.meta?.agent || "")} via ${esc(o.meta?.provider || "")}/${esc(o.meta?.model || "")} · ${ago(o.ts)}</div><div class="out">${esc(o.text)}</div>`).join("")
+          : (st.output ? `<div class="out">${esc(st.output)}</div>` : `<div class="muted small">No output.</div>`)) : `<div class="muted small">Loading…</div>`}`;
+  $("#rerun").onclick = async () => { try { await api(`/api/runs/${S.run.id}/nodes/${encodeURIComponent(parent)}/rerun`, { method: "POST" }); await refreshSelected(); } catch (e) { alert(e.message); } };
+}
+
+// ---------- conversation / activity / runs ----------
+async function renderChat(finished) {
+  const msgs = await api(`/api/tasks/${S.task.id}/messages`);
+  const body = $("#dbody"); if (S.tab !== "chat") return;
+  const draft = $("#followtext")?.value || "";
+  body.innerHTML = `<div style="margin-top:8px">${msgs.map(m => `<div class="msg ${esc(m.role)}"><div class="who">${esc(m.role)} · turn ${m.turn}</div>${esc(m.content)}</div>`).join("")}</div>
+    <div class="card" style="margin-top:8px"><textarea id="followtext" placeholder="${finished ? "Follow up on this task: ask a question, request another iteration…" : "You can follow up once the task has finished."}" ${finished ? "" : "disabled"}></textarea>
+    <div class="row" style="margin-top:6px"><button class="primary" id="followsend" ${finished ? "" : "disabled"}>Send follow-up</button><span class="small" id="followmsg"></span></div></div>`;
+  $("#followtext").value = draft;
+  $("#followsend").onclick = async () => {
+    const text = $("#followtext").value.trim(); if (!text) return;
+    try { await api(`/api/tasks/${S.task.id}/messages`, { method: "POST", body: { text } }); $("#followtext").value = ""; await refreshSelected(); }
+    catch (e) { $("#followmsg").textContent = e.message; }
+  };
+}
+
+const EV_KINDS = [["", "all"], ["status", "steps"], ["tool", "tools"], ["message", "agent messages"], ["human", "human"], ["error", "errors"]];
+function renderActivity() {
+  const body = $("#dbody");
+  if (!$("#evlog")) { body.innerHTML = `<div class="chips" id="evf" style="margin-top:8px"></div><div id="evlog" style="margin-top:8px"></div>`; }
+  $("#evf").innerHTML = EV_KINDS.map(([k, l]) => `<span class="chip ${(S.evKind || "") === k ? "on" : ""}" data-k="${k}">${l}</span>`).join("");
+  $("#evf").querySelectorAll(".chip").forEach(c => c.onclick = () => { S.evKind = c.dataset.k; renderActivity(); });
+  const log = $("#evlog");
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+  const want = S.evKind || "";
+  log.innerHTML = S.events.filter(e => !want || e.kind === want || (want === "tool" && e.kind === "tool_result")).map(e => `<div class="ev ${esc(e.kind)}"><span class="muted">${new Date(e.ts).toLocaleTimeString()}</span> <span class="s">${esc(e.source)}</span> ${esc(e.content)}</div>`).join("") || `<div class="empty">No activity yet.</div>`;
+  if (atBottom) log.scrollTop = log.scrollHeight;
+}
+
+async function renderRuns() {
+  const runs = await api(`/api/tasks/${S.task.id}/runs`);
+  if (S.tab !== "runs") return;
+  $("#dbody").innerHTML = `<table style="margin-top:8px"><tr><th>run</th><th>workflow</th><th>status</th><th>started</th><th></th></tr>
+    ${runs.map(r => `<tr><td>${esc(r.id)}</td><td>${esc(r.workflow)}</td><td>${esc(r.status)}</td><td>${ago(r.started_at)}</td>
+    <td><button data-r="${esc(r.id)}">view graph</button></td></tr>`).join("")}</table>`;
+  $("#dbody").querySelectorAll("button[data-r]").forEach(b => b.onclick = async () => { S.runId = b.dataset.r; S.node = null; await loadRun(); S.tab = "graph"; S.graphKey = ""; renderDetail(); });
+}
+
+// ---------- schedules ----------
+async function renderSchedules() {
+  const list = await api("/api/schedules");
+  $("#main").innerHTML = `<div class="card" style="max-width:1000px">
+    <h3 style="margin-top:0">Cron schedules <span class="small muted">(cron-scheduler: creates a task each time; times are UTC)</span></h3>
+    <div class="row"><input id="sname" placeholder="name" style="width:160px"><input id="scron" placeholder="cron, e.g. 0 9 * * 1-5" style="width:180px">
+    <input id="stext" placeholder="task text" style="flex:1;min-width:200px"><button class="primary" id="sadd">Add</button></div>
+    <div class="small" id="smsg"></div>
+    <table style="margin-top:10px"><tr><th>name</th><th>cron</th><th>task</th><th>next run</th><th>last task</th><th></th></tr>
+    ${list.map(s => `<tr><td>${esc(s.name)}</td><td><code>${esc(s.cron)}</code></td><td>${esc(s.text)}</td>
+      <td>${s.enabled ? esc(s.next_run ? new Date(s.next_run).toLocaleString() : "…") : "<i>paused</i>"}</td>
+      <td>${s.last_task_id ? `<a href="#task=${s.last_task_id}">#${s.last_task_id}</a>` : ""}</td>
+      <td><button data-t="${s.id}">${s.enabled ? "Pause" : "Resume"}</button> <button class="warn" data-d="${s.id}">Delete</button></td></tr>`).join("")}</table>
+    <p class="small muted">Google Calendar: ${S.meta?.calendars ? `${S.meta.calendars} calendar(s) polled; events with the tag in the title become tasks when they start.` : "not configured (set AI_TEAM_GCAL_ICS_URLS)."}</p></div>`;
+  $("#sadd").onclick = async () => { try { await api("/api/schedules", { method: "POST", body: { name: $("#sname").value, cron: $("#scron").value, text: $("#stext").value } }); renderSchedules(); } catch (e) { $("#smsg").textContent = e.message; } };
+  $("#main").querySelectorAll("button[data-t]").forEach(b => b.onclick = async () => { await api(`/api/schedules/${b.dataset.t}/toggle`, { method: "POST" }); renderSchedules(); });
+  $("#main").querySelectorAll("button[data-d]").forEach(b => b.onclick = async () => { await api(`/api/schedules/${b.dataset.d}`, { method: "DELETE" }); renderSchedules(); });
+  $("#main").querySelectorAll("a[href^='#task=']").forEach(a => a.onclick = () => { S.view = "tasks"; render(); select(+a.getAttribute("href").split("=")[1]); });
+}
+
+// ---------- system ----------
+async function renderSystem() {
+  const m = S.meta; if (!m) return;
+  const wfs = await api("/api/workflows");
+  $("#main").innerHTML = `<div class="cols" style="height:auto"><div class="col">
+    <div class="card"><h3 style="margin-top:0">Components</h3><table><tr><th>kind</th><th>instance</th><th>busy</th><th>heartbeat</th></tr>
+      ${m.services.map(s => `<tr><td>${esc(s.kind)}</td><td>${esc(s.host)}</td><td>${s.busy ?? ""}${s.capacity ? "/" + s.capacity : ""}</td><td>${Math.round(Date.now() / 1000 - s.ts)}s ago</td></tr>`).join("")}</table></div>
+    <div class="card"><h3 style="margin-top:0">Agents</h3><table><tr><th>agent</th><th>tier</th><th>does</th></tr>
+      ${(m.agents || []).map(a => `<tr><td><b>${esc(a.title || a.role)}</b><div class="small muted">${esc(a.role)}</div></td><td>${esc(a.tier || "")}</td>
+      <td class="small">${esc(a.description || "")}<div class="muted">${esc((a.used_by || []).join(" · "))}</div></td></tr>`).join("")}</table>
+      <div class="small muted" style="margin-top:6px">GitHub: ${m.github?.enabled ? `gh logged in${m.github.watch.length ? " · watching " + esc(m.github.watch.join(", ")) : ""}${m.github.push ? " · push on" : ""}` : "off (AI_TEAM_GITHUB_ENABLED)"}</div></div>
+    <div class="card"><h3 style="margin-top:0">LLM providers</h3><table><tr><th>name</th><th>type</th><th>on</th><th>models (fast / balanced / deep)</th><th>billing</th></tr>
+      ${m.providers.map(p => `<tr><td>${esc(p.name)}</td><td>${esc(p.type)}</td><td>${p.enabled ? "✅" : "—"}</td><td class="small">${esc([p.models.fast, p.models.balanced, p.models.deep].join(" / "))}</td><td class="small">${esc(p.billing || "")}</td></tr>`).join("")}</table>
+      <h4>Routing (first enabled provider wins, then fallback)</h4><table>${Object.entries(m.routes).map(([r, c]) => `<tr><td>${esc(r)}</td><td>${c.map(esc).join(" → ")}</td></tr>`).join("")}</table></div>
+    <div class="card"><div class="row"><h3 style="margin:0;flex:1">Notification channels</h3><button id="ntest">Send test notification</button></div>
+      <div class="small muted">Always stored on the dashboard; each enabled channel also gets what passes its filters (configs/notifications.yaml).</div>
+      <table id="chtable"></table><div class="small" id="ntestmsg"></div></div>
+    <div class="card small">Workspace <code>${esc(m.workspace_root)}</code> · ${m.projects.length} projects</div>
+  </div><div class="col">${wfs.map(w => `<div class="card"><h3 style="margin-top:0">${esc(w.name)}</h3><div class="small muted">${esc(w.description)}</div><div class="svgbox" data-m="${esc(w.name)}"></div></div>`).join("")}</div></div>`;
+  const chs = await api("/api/notifications/channels");
+  $("#chtable").innerHTML = `<tr><th>channel</th><th>type</th><th>on</th><th>events</th></tr>` + chs.map(c => `<tr><td>${esc(c.name)}</td><td>${esc(c.type)}</td>
+    <td>${c.enabled ? "✅" : c.configured ? "off" : "not configured"}</td><td class="small">${esc(c.events.join(", "))}</td></tr>`).join("");
+  $("#ntest").onclick = async () => { const r = await api("/api/notifications/test", { method: "POST" });
+    $("#ntestmsg").textContent = `queued for: dashboard${r.channels.length ? ", " + r.channels.join(", ") : ""} — see the bell for delivery results`; setTimeout(loadNotes, 3000); };
+  const draw = async () => { for (const w of wfs) { const el = $(`.svgbox[data-m="${w.name}"]`); if (!el) continue;
+    try { el.innerHTML = (await window.__mermaid.render("w" + w.name + Date.now(), w.mermaid)).svg; } catch (e) { el.innerHTML = `<pre>${esc(w.mermaid)}</pre>`; } } };
+  window.__mermaid ? draw() : window.addEventListener("mermaid-ready", draw, { once: true });
+}
+
+// ---------- notifications ----------
+let NOTES = { unread: 0, items: [] };
+async function loadNotes() {
+  NOTES = await api("/api/notifications").catch(() => NOTES);
+  $("#unread").hidden = !NOTES.unread; $("#unread").textContent = NOTES.unread;
+  if (!$("#drawer").hidden) renderDrawer();
+}
+function renderDrawer() {
+  $("#drawer").innerHTML = `<div class="row"><h3 style="margin:0;flex:1">Notifications</h3><button id="readall">Mark all read</button><button id="dclose">✕</button></div>
+    ${NOTES.items.map(n => `<div class="note ${n.read ? "" : "unread"}"><div class="nt" data-t="${n.task_id ?? ""}" data-id="${n.id}">${n.level === "action" ? "🙋" : n.level === "error" ? "❌" : "✅"} ${esc(n.title)}</div>
+      <div class="small muted">${ago(n.created_at)} · ${esc(n.event || "")}${Object.entries(n.delivered || {}).map(([k, v]) => ` · ${v.status === "ok" ? "✓" : "✗"} ${esc(k)}`).join("")}</div>
+      <div class="small" style="white-space:pre-wrap">${esc(n.message).slice(0, 500)}</div></div>`).join("") || `<div class="empty">Nothing yet.</div>`}`;
+  $("#dclose").onclick = () => { $("#drawer").hidden = true; };
+  $("#readall").onclick = async () => { await api("/api/notifications/read-all", { method: "POST" }); loadNotes(); };
+  $("#drawer").querySelectorAll(".nt").forEach(el => el.onclick = async () => {
+    await api(`/api/notifications/${el.dataset.id}/read`, { method: "POST" }); loadNotes();
+    if (el.dataset.t) { S.view = "tasks"; render(); select(+el.dataset.t); }
+  });
+}
+$("#bell").onclick = () => { $("#drawer").hidden = !$("#drawer").hidden; renderDrawer(); };
+
+// ---------- data ----------
+async function loadMeta() { S.meta = await api("/api/meta").catch(() => S.meta); }
+async function loadTasks() {
+  const p = new URLSearchParams(Object.entries(S.filter).filter(([, v]) => v));
+  S.tasks = await api("/api/tasks?" + p).catch(() => S.tasks);
+}
+async function loadRun() { const id = S.runId || S.task?.run_id; S.run = id ? await api(`/api/runs/${id}`).catch(() => null) : null; }
+async function loadTask() {
+  if (!S.sel) return;
+  S.task = await api(`/api/tasks/${S.sel}`).catch(() => null);
+  if (!S.task) return;
+  const ev = await api(`/api/tasks/${S.sel}/events?after=${S.lastSeq}`).catch(() => []);
+  if (ev.length) { S.events.push(...ev); S.lastSeq = ev[ev.length - 1].seq; }
+  if (!S.runId || S.runId === S.task.run_id) S.runId = null;
+  await loadRun();
+  if (S.node) await loadNode();
+}
+async function refreshSelected() { await Promise.all([loadTask(), loadTasks(), loadMeta()]); if (S.view === "tasks") renderTasksView(); }
+
+let ticking = false;
+async function tick() {
+  if (ticking) return; ticking = true;
+  try {
+    const onTasks = S.view === "tasks";
+    await Promise.all([loadMeta(), onTasks ? loadTasks() : null, onTasks ? loadTask() : null, loadNotes()]);
+    renderServices();
+    if (!onTasks) return;
+    if (S.tab === "graph" || S.tab === "activity") return renderTasksView();
+    // Conversation/Runs fetch their own data: refresh list + header, and the tab only when the task moved on
+    renderList();
+    if (S.task) {
+      const key = `${S.task.id}:${S.task.status}:${S.task.turn}`;
+      if ($("#dbody")?.dataset.key !== key) { renderDetail(); $("#dbody").dataset.key = key; }
+      else { renderHead(); renderHold(); }
+    }
+  } finally { ticking = false; }
+}
+
+(async function init() {
+  const m = location.hash.match(/task=(\d+)/);
+  await Promise.all([loadMeta(), loadTasks(), loadNotes()]);
+  render();
+  if (m) select(+m[1]);
+  setInterval(tick, 2500);
+  window.addEventListener("hashchange", () => { const h = location.hash.match(/task=(\d+)/); if (h && +h[1] !== S.sel) { S.view = "tasks"; render(); select(+h[1]); } });
+})();
+</script>
+</body>
+</html>

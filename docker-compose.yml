@@ -1,0 +1,95 @@
+# Local development: the whole platform with docker compose (production uses stack.yml on the swarm).
+#
+#   cp .env.example .env                      # AI_TEAM_PROVIDERS=mock costs nothing
+#   scripts/sync_skills.sh data/skills        # optional: your Claude skills for the agents
+#   docker compose up --build                 # or: docker compose watch  (live code sync + restart)
+#   open http://localhost:8765                # redis on 127.0.0.1:16379, mongo on 127.0.0.1:17017
+#
+# Dev state lives in ./data/dev (separate from any other data). Provider/GitHub logins are shared with
+# ./deploy.sh when you deploy from this machine: data/claude, data/codex, data/github.
+name: ai-team-dev
+
+x-app: &app
+  build:
+    context: .
+    args: {UID: "${AI_TEAM_UID:-1000}", GID: "${AI_TEAM_GID:-1000}"}
+  image: ai-team:dev
+  env_file: .env
+  environment:
+    AI_TEAM_REDIS_URL: redis://redis:6379/0
+    AI_TEAM_MONGO_URL: mongodb://mongo:27017
+    AI_TEAM_WORKSPACE_ROOT: /workspace
+    AI_TEAM_HIDDEN_DIRS: '["/workspace/ai-team"]'
+    AI_TEAM_DATA_DIR: /data
+    AI_TEAM_CLAUDE_TOKEN_FILE: /run/claude/oauth_token
+    AI_TEAM_PUBLIC_URL: "http://localhost:${AI_TEAM_PORT:-8765}"
+    GH_CONFIG_DIR: /data/github
+    GIT_AUTHOR_NAME: AI Team (dev)
+    GIT_AUTHOR_EMAIL: ai-team@localhost
+    GIT_COMMITTER_NAME: AI Team (dev)
+    GIT_COMMITTER_EMAIL: ai-team@localhost
+  volumes:
+    - ${AI_TEAM_WORKSPACE_ROOT:-..}:/workspace
+    - ./data/dev/empty:/workspace/ai-team:ro            # hide this repo from the agents
+    - ./data/claude-home:/data/claude-home
+    - ./data/codex:/data/codex
+    - ./data/github:/data/github
+    - ./data/skills:/data/skills:ro
+    - ./data/claude:/run/claude:ro
+  depends_on:
+    redis: {condition: service_healthy}
+    mongo: {condition: service_healthy}
+  restart: unless-stopped
+  develop:
+    watch:                                             # docker compose watch
+      - {action: sync+restart, path: ./src, target: /app/src}
+      - {action: sync+restart, path: ./configs, target: /app/configs}
+      - {action: rebuild, path: ./pyproject.toml}
+      - {action: rebuild, path: ./Dockerfile}
+
+services:
+  redis:
+    image: redis:8
+    command: redis-server --appendonly yes --appendfsync everysec --dir /data
+    ports: ["127.0.0.1:${AI_TEAM_DEV_REDIS_PORT:-16379}:6379"]
+    volumes: ["./data/dev/redis:/data"]
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 10}
+
+  mongo:
+    image: mongo:8.2
+    command: ["--wiredTigerCacheSizeGB", "0.25", "--quiet"]
+    environment: {GLIBC_TUNABLES: glibc.pthread.rseq=0}   # TCMalloc vs. Linux >= 6.19 (SERVER-121912)
+    ports: ["127.0.0.1:${AI_TEAM_DEV_MONGO_PORT:-17017}:27017"]
+    volumes: ["./data/dev/mongo:/data/db"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ping:1}).ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  scheduler:
+    <<: *app
+    hostname: scheduler            # stable consumer names, so pending work resumes after a restart
+    command: ["python", "-m", "app", "scheduler"]
+    ports: ["${AI_TEAM_PORT:-8765}:8765"]
+
+  orchestrator:
+    <<: *app
+    hostname: orchestrator
+    command: ["python", "-m", "app", "orchestrator"]
+
+  engine:
+    <<: *app
+    hostname: engine
+    command: ["python", "-m", "app", "engine"]
+
+  agent:
+    <<: *app
+    command: ["python", "-m", "app", "agent"]
+    deploy:
+      replicas: ${AI_TEAM_AGENTS:-2}
+
+  notifier:
+    <<: *app
+    hostname: notifier
+    command: ["python", "-m", "app", "notifier"]

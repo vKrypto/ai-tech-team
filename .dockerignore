@@ -1,4 +1,8 @@
 .venv
 data
 .env
+.git
 **/__pycache__
+tests
+plan.log
+stack.generated.yml

@@ -1,0 +1,37 @@
+# LLM providers. Each entry is a named provider; `type` selects the implementation in
+# src/app/llm/providers/ (claude_code | codex | openai | anthropic | google | ollama | bedrock | mock).
+# Adding a provider = adding an entry here (+ a class only if it is a new `type`).
+# Which providers are switched on is decided by AI_TEAM_PROVIDERS in .env (comma list).
+# ${VAR:-default} is replaced from the environment.
+providers:
+  claude:
+    type: claude_code            # Claude Code CLI, headless, on your subscription (./deploy.sh logs in)
+    models: {fast: haiku, balanced: sonnet, deep: opus}
+  omniroute:
+    type: openai                 # any OpenAI-compatible endpoint; here the self-hosted OmniRoute gateway
+    base_url: ${AI_TEAM_OMNIROUTE_URL:-http://192.168.100.10:10200/v1}
+    api_key: ${AI_TEAM_OMNIROUTE_API_KEY:-}
+    models: {fast: auto/best-fast, balanced: auto/best-coding, deep: auto/best-reasoning}
+  codex:
+    type: codex                  # OpenAI Codex CLI on a ChatGPT plan; empty model = plan default
+    models: {fast: "", balanced: "", deep: ""}
+  anthropic:
+    type: anthropic              # Anthropic API (pay as you go)
+    api_key: ${ANTHROPIC_API_KEY:-}
+    models: {fast: claude-haiku-4-5-20251001, balanced: claude-sonnet-5-5, deep: claude-opus-5-5}
+  mock:
+    type: mock                   # deterministic fake agents: exercises the whole pipeline for free
+    models: {fast: mock, balanced: mock, deep: mock}
+
+# Routing: ordered provider chains. The first enabled provider is used; if it fails (auth, rate limit,
+# outage) the job falls back to the next one. Per-role chains override the default.
+routing:
+  default: ${AI_TEAM_ROUTE_DEFAULT:-claude,omniroute,codex,anthropic,mock}
+  roles:
+    orchestrator: ${AI_TEAM_ROUTE_ORCHESTRATOR:-omniroute,claude,codex,anthropic,mock}
+
+# USD per million tokens (input, output), for cost estimates of token-billed providers.
+pricing:
+  claude-haiku-4-5-20251001: [1.0, 5.0]
+  claude-sonnet-5-5: [3.0, 15.0]
+  claude-opus-5-5: [5.0, 25.0]

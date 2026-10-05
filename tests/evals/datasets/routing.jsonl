@@ -1,0 +1,10 @@
+{"text": "Fix the login crash in demo-app when the password is empty", "workflow": "coding", "task_type": "bugfix", "project": "demo-app"}
+{"text": "Add a /health endpoint to demo-app", "workflow": "coding", "task_type": "development", "project": "demo-app"}
+{"text": "Research and compare Redis Streams, NATS and Kafka for a small team", "workflow": "research", "task_type": "research", "project": "general"}
+{"text": "Review the error handling in demo-app", "workflow": "task_execution", "task_type": "review", "project": "demo-app"}
+{"text": "What does the deploy script in demo-app do?", "workflow": "task_execution", "task_type": "enquiry", "project": "demo-app"}
+{"text": "Plan the migration of demo-app from SQLite to Postgres", "workflow": "task_execution", "task_type": "planning", "project": "demo-app"}
+{"text": "Run the test suite of demo-app and report failures", "workflow": "task_execution", "task_type": "testing", "project": "demo-app"}
+{"text": "Update the README of demo-app with setup instructions", "workflow": "coding", "task_type": "docs", "project": "demo-app"}
+{"text": "Review pull request #42 in demo-app", "workflow": "pr_review", "task_type": "pr_review", "project": "demo-app"}
+{"text": "Groom the demo-app backlog: label new issues and set milestones for the next sprint", "workflow": "scrum", "task_type": "project_management", "project": "demo-app"}

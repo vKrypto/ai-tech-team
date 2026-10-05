@@ -1,37 +1,51 @@
-# AI Team: dashboard + orchestrator + agents in one image.
-# Deliberately no git in the image: agents must not interact with git at all.
+# One image for every component (scheduler, orchestrator, engine, agent, notifier); the stack picks the
+# command. Agents work in full-access mode, so the image carries their toolbox: git, gh, curl, node, a headless
+# Chromium (Playwright, for the Python tool and the Playwright MCP server), Claude Code and Codex CLIs.
 FROM python:3.14-slim
 
-ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl ca-certificates git jq ripgrep procps nodejs npm sqlite3 build-essential \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+         -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+         > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/* \
+    && git config --system --add safe.directory '*'
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
 
-# Same UID/GID as the workstation user, so files the coder writes in /workspace stay yours.
+# Python deps first (cached unless pyproject changes)
+COPY pyproject.toml .
+RUN python -c "import tomllib; print('\n'.join(tomllib.load(open('pyproject.toml','rb'))['project']['dependencies']))" \
+      > /tmp/requirements.txt && pip install -r /tmp/requirements.txt
+
+# Browsers: Python Playwright's Chromium (+ system deps), and the Playwright MCP server with its own
+# Playwright's Chromium (versions can differ), both under /ms-playwright.
+ARG PLAYWRIGHT_MCP_VERSION=latest
+RUN playwright install --with-deps chromium \
+    && npm install -g "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
+    && cd "$(npm root -g)/@playwright/mcp" && npx --no-install playwright install chromium \
+    && chmod -R a+rX /ms-playwright && npm cache clean --force
+
+# Same UID/GID as the workstation user, so files agents write in /workspace stay yours.
 ARG UID=1000
 ARG GID=1000
 RUN groupadd -g ${GID} agent && useradd -u ${UID} -g ${GID} -m agent && mkdir -p /data && chown agent:agent /data
 USER agent
 
-# Claude Code CLI for AI_TEAM_AGENT_BACKEND=cli (official native installer, to ~/.local/bin).
+# Claude Code CLI (provider type claude_code) and Codex CLI (provider type codex)
 RUN curl -fsSL https://claude.ai/install.sh | bash
 ENV PATH=/home/agent/.local/bin:$PATH DISABLE_AUTOUPDATER=1
-
-# OpenAI Codex CLI for AI_TEAM_AGENT_BACKEND=codex (pinned release binary).
 ARG CODEX_VERSION=0.160.0
 RUN curl -fsSL "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-x86_64-unknown-linux-musl.tar.gz" \
       | tar xz -C /tmp && mv /tmp/codex-x86_64-unknown-linux-musl /home/agent/.local/bin/codex
 
-COPY ai_team ai_team
-COPY dashboard dashboard
-
-ENV AI_TEAM_WORKSPACE_ROOT=/workspace \
-    AI_TEAM_DB_PATH=/data/tasks.db \
-    AI_TEAM_HIDDEN_DIRS='["/workspace/ai-team"]' \
-    AI_TEAM_CODEX_HOME=/data/codex
+COPY --chown=agent:agent configs configs
+COPY --chown=agent:agent src src
+ENV PYTHONPATH=/app/src AI_TEAM_DATA_DIR=/data AI_TEAM_WORKSPACE_ROOT=/workspace \
+    AI_TEAM_HIDDEN_DIRS='["/workspace/ai-team"]'
 EXPOSE 8765
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --start-interval=2s \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/meta', timeout=4)"
-CMD ["python", "-m", "ai_team", "--host", "0.0.0.0", "--port", "8765"]
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --start-interval=2s CMD python -m app health
+CMD ["python", "-m", "app", "agent"]

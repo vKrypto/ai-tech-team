@@ -1,0 +1,292 @@
+multi-agent-platform/
+│
+├── pyproject.toml
+├── README.md
+├── .env.example
+├── docker-compose.yml
+├── langgraph.json
+│
+├── configs/
+│   ├── app.yaml
+│   ├── models.yaml
+│   ├── agents.yaml
+│   └── workflows.yaml
+│
+├── src/
+│   └── app/
+│       │
+│       ├── main.py
+│       │
+│       ├── bootstrap.py
+│       │
+│       ├── settings.py
+│       │
+│       ├── constants.py
+│       │
+│       │
+│       ├── domain/
+│       │   ├── task.py
+│       │   ├── task_result.py
+│       │   ├── execution.py
+│       │   ├── events.py
+│       │   └── enums.py
+│       │
+│       ├── workflows/
+│       │   │
+│       │   ├── registry.py
+│       │   ├── factory.py
+│       │   │
+│       │   ├── common/
+│       │   │   ├── state.py
+│       │   │   ├── context.py
+│       │   │   │
+│       │   │   ├── nodes/
+│       │   │   │   ├── validate_task.py
+│       │   │   │   ├── load_context.py
+│       │   │   │   ├── finalize.py
+│       │   │   │   └── handle_error.py
+│       │   │   │
+│       │   │   └── subgraphs/
+│       │   │       ├── approval.py
+│       │   │       └── recovery.py
+│       │   │
+│       │   ├── task_execution/
+│       │   │   ├── graph.py
+│       │   │   ├── state.py
+│       │   │   ├── routes.py
+│       │   │   ├── policies.py
+│       │   │   │
+│       │   │   ├── nodes/
+│       │   │   │   ├── receive_task.py
+│       │   │   │   ├── understand_task.py
+│       │   │   │   ├── plan_task.py
+│       │   │   │   ├── select_agent.py
+│       │   │   │   ├── execute_agent.py
+│       │   │   │   ├── validate_result.py
+│       │   │   │   ├── replan.py
+│       │   │   │   └── complete.py
+│       │   │   │
+│       │   │   └── subgraphs/
+│       │   │       ├── research_graph.py
+│       │   │       ├── coding_graph.py
+│       │   │       └── validation_graph.py
+│       │   │
+│       │   ├── research/
+│       │   │   ├── graph.py
+│       │   │   ├── state.py
+│       │   │   ├── nodes/
+│       │   │   │   ├── plan.py
+│       │   │   │   ├── search.py
+│       │   │   │   ├── analyze.py
+│       │   │   │   └── synthesize.py
+│       │   │   └── routes.py
+│       │   │
+│       │   └── coding/
+│       │       ├── graph.py
+│       │       ├── state.py
+│       │       ├── nodes/
+│       │       │   ├── inspect_repo.py
+│       │       │   ├── plan_changes.py
+│       │       │   ├── implement.py
+│       │       │   ├── test.py
+│       │       │   └── review.py
+│       │       └── routes.py
+│       │
+│       ├── agents/
+│       │   ├── registry.py
+│       │   ├── factory.py
+│       │   ├── base.py
+│       │   │
+│       │   ├── orchestrator/
+│       │   │   ├── agent.py
+│       │   │   ├── prompt.py
+│       │   │   ├── schemas.py
+│       │   │   └── policies.py
+│       │   │
+│       │   ├── planner/
+│       │   │   ├── agent.py
+│       │   │   └── prompt.py
+│       │   │
+│       │   ├── researcher/
+│       │   │   ├── agent.py
+│       │   │   └── prompt.py
+│       │   │
+│       │   ├── coder/
+│       │   │   ├── agent.py
+│       │   │   └── prompt.py
+│       │   │
+│       │   └── reviewer/
+│       │       ├── agent.py
+│       │       └── prompt.py
+│       │
+│       ├── tools/
+│       │   ├── registry.py
+│       │   ├── base.py
+│       │   │
+│       │   ├── filesystem/
+│       │   │   ├── read.py
+│       │   │   ├── write.py
+│       │   │   └── search.py
+│       │   │
+│       │   ├── shell/
+│       │   │   └── execute.py
+│       │   │
+│       │   ├── git/
+│       │   │   ├── status.py
+│       │   │   ├── diff.py
+│       │   │   └── commit.py
+│       │   │
+│       │   ├── web/
+│       │   │   ├── search.py
+│       │   │   └── fetch.py
+│       │   │
+│       │   └── database/
+│       │       ├── query.py
+│       │       └── schema.py
+│       │
+│       ├── llm/
+│       │   ├── registry.py
+│       │   ├── factory.py
+│       │   ├── router.py
+│       │   ├── fallback.py
+│       │   ├── capabilities.py
+│       │   │
+│       │   ├── providers/
+│       │   │   ├── openai.py
+│       │   │   ├── anthropic.py
+│       │   │   ├── google.py
+│       │   │   ├── ollama.py
+│       │   │   └── bedrock.py
+│       │   │
+│       │   └── pricing/
+│       │       └── calculator.py
+│       │
+│       ├── orchestration/
+│       │   ├── planner.py
+│       │   ├── dispatcher.py
+│       │   ├── scheduler.py
+│       │   ├── agent_selector.py
+│       │   ├── model_selector.py
+│       │   ├── tool_selector.py
+│       │   └── execution_policy.py
+│       │
+│       ├── runtime/
+│       │   ├── executor.py
+│       │   ├── run_context.py
+│       │   ├── graph_runner.py
+│       │   ├── cancellation.py
+│       │   └── retry.py
+│       │
+│       ├── persistence/
+│       │   ├── checkpoints.py
+│       │   ├── store.py
+│       │   ├── task_repository.py
+│       │   ├── run_repository.py
+│       │   └── artifacts.py
+│       │
+│       ├── memory/
+│       │   ├── short_term.py
+│       │   ├── long_term.py
+│       │   └── context_builder.py
+│       │
+│       ├── prompts/
+│       │   ├── loader.py
+│       │   ├── common/
+│       │   └── templates/
+│       │
+│       ├── guardrails/
+│       │   ├── input.py
+│       │   ├── output.py
+│       │   ├── tool_permissions.py
+│       │   └── budget.py
+│       │
+│       ├── observability/
+│       │   ├── tracing.py
+│       │   ├── metrics.py
+│       │   ├── logging.py
+│       │   └── events.py
+│       │
+│       └── api/
+│           ├── dependencies.py
+│           ├── routes/
+│           │   ├── tasks.py
+│           │   ├── runs.py
+│           │   └── health.py
+│           └── schemas/
+│               ├── task.py
+│               └── run.py
+│
+├── tests/
+│   ├── unit/
+│   │   ├── nodes/
+│   │   ├── agents/
+│   │   ├── tools/
+│   │   └── llm/
+│   │
+│   ├── workflows/
+│   │   ├── test_task_execution.py
+│   │   ├── test_research.py
+│   │   └── test_coding.py
+│   │
+│   ├── integration/
+│   └── evals/
+│       ├── datasets/
+│       └── test_agent_quality.py
+│
+└── scripts/
+    ├── run_local.py
+    ├── seed.py
+    └── evaluate.py
+
+
+
+bro let's re-build this project from scratch following above folder..
+Schedulers:
+    multiple schedulers: google-calander-scheduler, dashboard-ui-scheduler, etc.. responsible for scheduling the task and push to task system. it will also be responsible for monitoring the task execution and handle any errors that may arise during execution. it will also provide the ability to re-execute specific nodes if needed, allowing for flexibility in the task execution process. it will also maintain the state of each task and its associated nodes, ensuring that the overall workflow progresses smoothly and efficiently. it will also provide mechanisms for error handling and recovery, allowing for the graceful handling of failures and the ability to recover from errors without disrupting the overall workflow. it will also have ability to continue chat on same task may be new iteration etc.. or some follow up question by user.
+    message status can be : created
+
+
+Architestrator agent: responsible for reading task from from broker we can use redis as broker here, so architestrator agent will work as consumer, it reads the task from broker and do basic understanding of task, like what is the type of task, related project, etc.. based on that it will create a workflow and push to workflow engine for execution. it will also be responsible for monitoring the workflow execution and handle any errors that may arise during execution. it will also provide the ability to re-execute specific nodes if needed, allowing for flexibility in the task execution process. it will also maintain the state of each task and its associated nodes, ensuring that the overall workflow progresses smoothly and efficiently. it will also provide mechanisms for error handling and recovery, allowing for the graceful handling of failures and the ability to recover from errors without disrupting the overall workflow. it will also have ability to continue chat on same task may be new iteration etc.. or some follow up question by user.
+message status can be : queued
+
+
+
+Workflow engine: he is responsible for workflow execution, node re-execution, state management, error handling, and recovery. It will manage the execution of tasks based on the defined workflows and ensure that each node is executed in the correct order, handling any errors that may arise during execution. it will also provide the ability to re-execute specific nodes if needed, allowing for flexibility in the task execution process. The workflow engine will maintain the state of each task and its associated nodes, ensuring that the overall workflow progresses smoothly and efficiently. it will also provide mechanisms for error handling and recovery, allowing for the graceful handling of failures and the ability to recover from errors without disrupting the overall workflow. The workflow engine will be a critical component of the multi-agent platform, ensuring that tasks are executed correctly and efficiently, while also providing the necessary tools for managing errors and maintaining the state of the workflow.
+it will also have ability to continue chat on same task may be new iteration etc.. or some follow up question by user.
+message status can be : processing
+
+
+normal task flow 
+
+from scheduler (google-calender-scheduler, dashboard-ui-scheduler) --> push task system(status=> created) architestrator agent pick the task and do basic understanding(metadata: related_project(existing or new), type: enquiry/r&d/development, review, testing, planning etc..) --> based an that it create a workflow (task_execution/research/coding) and push to workflow engine --> workflow engine will pick the task and push to first agent/node it will get it's job done.. and then follow workflow accordingly., each agents will have lot of skills (copy all of my current system level claude skills) multiple tools like (curl, fetch, git, etc..) it can use them, and one playwright-browser too. as a tool... all the agents will work on full access mode, auto mode, if human approval required(mark that task as hold:Human required state, and send a notfication to notification service a message as task, project nd problem along with option details..) and once done you can mark task as done.. and complete worflow can be seedn on ui as grpah.
+
+
+
+you can have multiple components like
+
+one node for schedulers:
+one node for consumer:
+one node for workflow engine:
+3 node for agents
+redis for memory/state management.[durability required]
+mongodb for tasks store etc. [use mounted folder for durability[] 
+
+you can add other nodes too if required, you can have folders acordingly as per node.. or whatever best suite to you.
+
+and use docker stack and deploy.sh as currently, update readme.md as new architecture (include high level diagram, data-flow diagram)
+
+
+
+forgot to mention we will have multiple llm providers:
+currently we are having only claude, omni route(self-hosted). in future we will add few more  providers.
+
+
+we need to have some of the agent pre built
+
+Senior Software Engineer (Developer, write unit-test etc.)
+Platform Architect (Task-Planner)
+Team Lead(Task Reviewer)
+Tester(cross verifies feature is working as expected) 
+pr-reviewer
+scrum-master
+

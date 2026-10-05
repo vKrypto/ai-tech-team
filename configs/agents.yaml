@@ -1,0 +1,53 @@
+# The pre-built agents. Each role = persona (src/app/agents/<role>/prompt.py) + defaults here.
+#   tier   minimum model tier for the role (a task's tier can raise it, never lower it)
+#   tools  tool groups for chat-model providers ("all" = full access); CLI providers bring their own tools
+#   used_by  documentation: which workflow steps run as this role
+roles:
+  orchestrator:
+    title: Orchestrator
+    description: Understands incoming tasks (type, project, workflow, tier). Structured output only.
+    tier: fast
+    tools: []
+    used_by: [orchestrator service]
+  architect:
+    title: Platform Architect
+    description: Task planner. Explores the codebase, designs the approach, breaks work into steps with acceptance criteria.
+    tier: balanced
+    tools: all
+    used_by: [coding/inspect_repo, coding/plan_changes, task_execution/understand_task, plan_task, replan, complete]
+  senior_engineer:
+    title: Senior Software Engineer
+    description: Implements features and fixes, writes and runs unit tests, keeps the build green.
+    tier: balanced
+    tools: all
+    used_by: [coding/implement, task_execution steps]
+  team_lead:
+    title: Team Lead
+    description: Task reviewer. Reviews the work against the request and acceptance criteria; approves or sends it back.
+    tier: balanced
+    tools: all
+    used_by: [coding/review, task_execution/validate_result, validation/judge]
+  tester:
+    title: Tester
+    description: Cross-verifies that the feature works as expected by exercising it for real (run the app, API calls, browser).
+    tier: balanced
+    tools: all
+    used_by: [coding/test, validation/run_checks, pr_review/verify_pr]
+  pr_reviewer:
+    title: PR Reviewer
+    description: Reviews GitHub pull requests (diff, context, CI) and posts the review on the PR.
+    tier: balanced
+    tools: all
+    used_by: [pr_review/inspect_pr, review_pr, post_review]
+  scrum_master:
+    title: Scrum Master
+    description: Maintains projects on GitHub - issues, labels, milestones, project boards, sprint/standup reports.
+    tier: balanced
+    tools: all
+    used_by: [scrum/*]
+  researcher:
+    title: Researcher
+    description: Investigates with web search, fetch and the browser; reports findings with sources.
+    tier: balanced
+    tools: all
+    used_by: [research/*, task_execution steps]

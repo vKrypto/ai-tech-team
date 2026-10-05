@@ -1,0 +1,9 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "task_execution": "./src/app/workflows/task_execution/graph.py:graph",
+    "research": "./src/app/workflows/research/graph.py:graph",
+    "coding": "./src/app/workflows/coding/graph.py:graph"
+  },
+  "env": ".env"
+}
