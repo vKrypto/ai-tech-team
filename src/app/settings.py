@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     web_search_url: str = ""                   # SearXNG base URL; empty = DuckDuckGo HTML
 
     http_port: int = 8765
+    ui_username: str = "admin"                 # dashboard + API login (change in the env file)
+    ui_password: str = "admin@123"
+    session_secret: str = ""                   # empty = generated once and kept in Mongo
+    session_days: int = 7
     public_url: str = "http://localhost:8765"  # used in notification links
 
     gcal_ics_urls: Annotated[list[str], NoDecode] = []              # Google Calendar "secret address in iCal format"

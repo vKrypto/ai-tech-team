@@ -67,6 +67,9 @@ PROVIDERS="$(env_get AI_TEAM_PROVIDERS | tr -d '[]" ' )"; PROVIDERS="${PROVIDERS
 has_provider() { [[ ",$PROVIDERS," == *",$1,"* ]]; }
 GITHUB="$(env_get AI_TEAM_GITHUB_ENABLED)"; [ "$GITHUB" = true ] || GITHUB=false
 BASE_URL="http://$DEPLOY_HOST:$AI_TEAM_PORT"
+UI_USER="$(env_get AI_TEAM_UI_USERNAME)"; UI_USER="${UI_USER:-admin}"
+UI_PASS="$(env_get AI_TEAM_UI_PASSWORD)"; UI_PASS="${UI_PASS:-admin@123}"
+acurl() { curl -u "$UI_USER:$UI_PASS" "$@"; }   # the API needs a login (Basic auth for scripts)
 UIDGID="$(id -u):$(id -g)"
 # Local, per-target state (never in git): the Claude token. Everything else lives on the target.
 STATE_DIR="data/deploy/$CTX"
@@ -271,7 +274,7 @@ ok "mongo durability: files in $DATA_HOST_DIR/mongo"
 
 META=""
 while :; do
-  META="$(curl -sf -m 5 "$BASE_URL/api/meta" || true)"
+  META="$(acurl -sf -m 5 "$BASE_URL/api/meta" || true)"
   [ -n "$META" ] && err="$(printf '%s' "$META" | python3 -c '
 import json, sys
 m, agents, providers = json.load(sys.stdin), int(sys.argv[1]), sys.argv[2].split(",")
@@ -290,7 +293,9 @@ ok "api: all components heartbeating, providers [$PROVIDERS], $err project(s) in
 [ "$err" != 0 ] || echo "  ! the workspace is empty: clone repos into $WORKSPACE_HOST_DIR (or ask the team to, with gh)"
 code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 "$BASE_URL/")"
 [ "$code" = 200 ] || fail "dashboard returned HTTP $code"
-ok "dashboard: $BASE_URL/"
+code="$(curl -s -o /dev/null -w '%{http_code}' -m 5 "$BASE_URL/api/meta")"
+[ "$code" = 401 ] || fail "API answered $code without a login (expected 401)"
+ok "dashboard: $BASE_URL/ (API requires login)"
 PUBLIC_URL="$(env_get AI_TEAM_PUBLIC_URL)"
 PUBLIC_HOST="$(printf '%s' "$PUBLIC_URL" | sed -E 's#^[a-z]+://##; s#[:/].*##')"
 if [ -n "$PUBLIC_HOST" ] && [ "$PUBLIC_HOST" != "$DEPLOY_HOST" ] && [ "$PUBLIC_HOST" != localhost ]; then
@@ -319,11 +324,11 @@ fi
 
 if $SMOKE; then
   echo "smoke test: one small real task…"
-  tid="$(curl -sf -XPOST "$BASE_URL/api/tasks" -H 'content-type: application/json' \
+  tid="$(acurl -sf -XPOST "$BASE_URL/api/tasks" -H 'content-type: application/json' \
          -d '{"text":"Smoke test: what is 2 + 2? Answer with just the number."}' | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])')"
   sdeadline=$((SECONDS + 600))
   while :; do
-    st="$(curl -sf "$BASE_URL/api/tasks/$tid" | python3 -c 'import json,sys;print(json.load(sys.stdin)["status"])')"
+    st="$(acurl -sf "$BASE_URL/api/tasks/$tid" | python3 -c 'import json,sys;print(json.load(sys.stdin)["status"])')"
     case "$st" in done) ok "smoke task #$tid done"; break ;; failed|cancelled|hold*) fail "smoke task #$tid ended $st" ;; esac
     [ "$SECONDS" -lt "$sdeadline" ] || fail "smoke task #$tid still $st after 10 min"
     sleep 3

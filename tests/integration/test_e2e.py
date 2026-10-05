@@ -4,6 +4,7 @@
 
 Skipped unless AI_TEAM_E2E_URL is set. Uses the mock provider's markers: [ask] [fail] [slow] [code].
 """
+import base64
 import json
 import os
 import time
@@ -13,6 +14,7 @@ import urllib.request
 import pytest
 
 BASE = os.environ.get("AI_TEAM_E2E_URL", "")
+AUTH = "Basic " + base64.b64encode(os.environ.get("AI_TEAM_E2E_AUTH", "admin:admin@123").encode()).decode()
 pytestmark = pytest.mark.skipif(not BASE, reason="set AI_TEAM_E2E_URL to a running stack (mock provider)")
 FINAL = {"done", "failed", "cancelled", "hold:human_required"}
 
@@ -20,7 +22,7 @@ FINAL = {"done", "failed", "cancelled", "hold:human_required"}
 def call(method: str, path: str, body=None):
     req = urllib.request.Request(BASE.rstrip("/") + path, method=method,
                                  data=json.dumps(body).encode() if body is not None else None,
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": "application/json", "Authorization": AUTH})
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return json.loads(r.read() or "null")
@@ -122,3 +124,19 @@ def test_notifications():
     time.sleep(1)
     n = call("GET", "/api/notifications")
     assert n["items"], "no notifications recorded"
+
+
+def test_api_requires_login():
+    req = urllib.request.Request(BASE.rstrip("/") + "/api/meta")
+    try:
+        urllib.request.urlopen(req, timeout=10)
+        raise AssertionError("API answered without a login")
+    except urllib.error.HTTPError as e:
+        assert e.code == 401
+    with urllib.request.urlopen(BASE.rstrip("/") + "/api/health", timeout=10) as r:   # stays public for monitors
+        assert r.status == 200
+
+
+def test_dashboard_summary():
+    d = call("GET", "/api/dashboard")
+    assert set(d["counts"]) >= {"processing", "queued", "done", "cancelled"} and "running" in d and "recent" in d

@@ -133,6 +133,29 @@ stateDiagram-v2
   state "hold:human_required" as hold
 ```
 
+## Dashboard
+
+Mobile-first web app at http://ai-team.local.internal: a bottom tab bar on phones and a sidebar on wide
+screens. It installs nicely as a home-screen shortcut.
+
+| Screen | What's there |
+|---|---|
+| **Login** | Username/password from `AI_TEAM_UI_USERNAME` / `AI_TEAM_UI_PASSWORD` (default `admin` / `admin@123`, prefilled). The session is a signed HttpOnly cookie, 7 days by default. |
+| **Home** | Counters for running, queued, needs you, closed, failed and cancelled (tap one for the filtered list), the 5 running tasks with current step and elapsed time, decisions waiting for you, up next, recently finished, component health |
+| **Tasks** | Search, status chips, project filter |
+| **Task** | Details and actions, the decision panel when the task is on hold, and tabs: **Workflow** (live graph with zoom; tap a step for its output and *Re-run from here*), **Conversation** (follow-ups), **Activity** (filterable step log), **Runs** |
+| **+** | New task sheet |
+| **Schedules** | Cron schedules; Google Calendar and GitHub watcher status |
+| **System** | Components, agents, providers and routing, notification channels with a test button, workflow diagrams |
+| **Bell** | Notifications with per-channel delivery status |
+
+Access rules:
+- The whole API requires login except `/api/health`, which stays public for Uptime Kuma and the deploy
+  checks.
+- Scripts use HTTP Basic auth with the same credentials (`curl -u admin:… …/api/dashboard`).
+- Five failed logins in a minute lock that client out for a minute.
+- **Change the default password** in `.env.prod` if the dashboard is reachable beyond your LAN.
+
 ## Workflows
 
 Defined in `src/app/workflows/` (LangGraph). The orchestrator picks one per turn; `configs/workflows.yaml`

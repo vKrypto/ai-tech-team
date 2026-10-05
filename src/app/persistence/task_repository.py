@@ -36,8 +36,8 @@ def get(task_id: int) -> dict | None:
 def find(status: str | None = None, task_type: str | None = None, project: str | None = None,
          q: str | None = None, limit: int = 300) -> list[dict]:
     flt: dict = {}
-    if status:
-        flt["status"] = status
+    if status:   # one status or a comma-separated list
+        flt["status"] = {"$in": status.split(",")} if "," in status else status
     if task_type:
         flt["task_type"] = task_type
     if project:
@@ -45,7 +45,8 @@ def find(status: str | None = None, task_type: str | None = None, project: str |
     if q:
         flt["$or"] = [{"text": {"$regex": q, "$options": "i"}}, {"title": {"$regex": q, "$options": "i"}}]
     proj = {"text": 1, "title": 1, "status": 1, "source": 1, "project": 1, "task_type": 1, "workflow": 1,
-            "turn": 1, "created_at": 1, "updated_at": 1, "error": 1, "hold": 1, "run_id": 1}
+            "turn": 1, "created_at": 1, "updated_at": 1, "started_at": 1, "finished_at": 1, "error": 1, "hold": 1,
+            "run_id": 1}
     return [_out(d) for d in db()[C.C_TASKS].find(flt, proj).sort("_id", DESCENDING).limit(limit)]
 
 
@@ -95,7 +96,8 @@ def add_message(task_id: int, turn: int, role: str, content: str) -> None:
 
 def list_messages(task_id: int) -> list[dict]:
     return [{k: v for k, v in m.items() if k != "_id"}
-            for m in db()[C.C_MESSAGES].find({"task_id": int(task_id)}).sort("_id", 1)]
+            for m in db()[C.C_MESSAGES].find({"task_id": int(task_id)}).sort([("ts", 1), ("_id", 1)])]
+    # by time: _ids are minted by different processes (scheduler, engine), so they don't sort chronologically
 
 
 def delete_messages(task_id: int, turn: int, roles: tuple[str, ...]) -> None:

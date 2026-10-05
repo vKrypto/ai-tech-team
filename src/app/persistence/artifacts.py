@@ -10,4 +10,4 @@ def save(run_id: str, task_id: int, node: str, text: str, meta: dict | None = No
 
 def for_node(run_id: str, node: str) -> list[dict]:
     return [{k: v for k, v in d.items() if k != "_id"}
-            for d in db()[C.C_ARTIFACTS].find({"run_id": run_id, "node": node}).sort("_id", 1)]
+            for d in db()[C.C_ARTIFACTS].find({"run_id": run_id, "node": node}).sort([("ts", 1), ("_id", 1)])]
