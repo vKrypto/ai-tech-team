@@ -35,7 +35,8 @@ def parse_needs_human(text: str) -> tuple[str, dict | None]:
 
 
 def git_rule() -> str:
-    rule = "git: commit only when your step says so or the task asks for it; never rewrite published history; "
+    rule = ("git: work for a task happens on its own branch (named in your brief), never on main/master; only the "
+            "Senior Engineer commits, other roles inspect; never rewrite published history; ")
     rule += ("you may push a feature branch and open a PR with `gh pr create` when the task asks for it, never push "
              "to the default branch." if settings.git_push_enabled else "never push (no push access).")
     if settings.github_enabled:

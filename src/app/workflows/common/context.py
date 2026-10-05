@@ -14,6 +14,7 @@ from ...runtime import cancellation
 from ...runtime.cancellation import Cancelled
 from ...runtime.executor import dispatch_and_wait
 from ...runtime.run_context import RunContext
+from . import branches
 
 log = logging.getLogger(__name__)
 OUTPUT_CHARS = 8000
@@ -102,6 +103,13 @@ def brief(state: dict, node: str, instruction: str, include: list[str] = ()) -> 
     text = _section(f"Task (turn {state.get('turn', 1)})", state.get("request"))
     text += _section("Earlier conversation on this task", state.get("history"))
     text += _section("Project", state.get("project_info"))
+    if branches.uses_git(state):
+        base, sub = branches.for_state(state)
+        text += _section("Git branch", (
+            f"Task #{state['task_id']} branch: `{base}`"
+            + (f"\nThis sub-task's branch: `{sub}` (created from `{base}`, merged back into it when done)" if sub else "")
+            + "\nAll changes for this task live on these branches, never on main/master. Roles that only inspect or "
+              "test: check out the branch to look at the work."))
     text += _section("What the team learned on this project before", state.get("project_memory"))
     if step:
         n = len(state.get("steps") or [])
