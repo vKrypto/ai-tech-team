@@ -62,6 +62,7 @@ fi
   || { echo "set AI_TEAM_DATA_ROOT and AI_TEAM_WORKSPACE_ROOT to absolute paths on the target in $ENV_FILE" >&2; exit 2; }
 export AI_TEAM_PORT="$(env_get AI_TEAM_PORT)"; AI_TEAM_PORT="${AI_TEAM_PORT:-8765}"
 export AI_TEAM_AGENTS="$(env_get AI_TEAM_AGENTS)"; AI_TEAM_AGENTS="${AI_TEAM_AGENTS:-3}"
+export AI_TEAM_ENGINES="$(env_get AI_TEAM_ENGINES)"; AI_TEAM_ENGINES="${AI_TEAM_ENGINES:-3}"
 REGISTRY="$(env_get AI_TEAM_REGISTRY)"
 PROVIDERS="$(env_get AI_TEAM_PROVIDERS | tr -d '[]" ' )"; PROVIDERS="${PROVIDERS:-mock}"
 has_provider() { [[ ",$PROVIDERS," == *",$1,"* ]]; }
@@ -243,7 +244,7 @@ fail() {
   done
   exit 1
 }
-want_replicas() { [ "$1" = agent ] && echo "$AI_TEAM_AGENTS" || echo 1; }
+want_replicas() { case "$1" in agent) echo "$AI_TEAM_AGENTS" ;; engine) echo "$AI_TEAM_ENGINES" ;; *) echo 1 ;; esac; }
 running_new() {  # healthy containers of a service on the new image (single-node swarm: all on the manager)
   local svc="${STACK}_$1" n=0 c
   for c in $(dk ps -q --filter "label=com.docker.swarm.service.name=$svc"); do
@@ -277,15 +278,15 @@ while :; do
   META="$(acurl -sf -m 5 "$BASE_URL/api/meta" || true)"
   [ -n "$META" ] && err="$(printf '%s' "$META" | python3 -c '
 import json, sys
-m, agents, providers = json.load(sys.stdin), int(sys.argv[1]), sys.argv[2].split(",")
+m, agents, providers, engines = json.load(sys.stdin), int(sys.argv[1]), sys.argv[2].split(","), int(sys.argv[3])
 kinds = [s["kind"] for s in m["services"]]
-need = {"scheduler": 1, "orchestrator": 1, "engine": 1, "agent": agents, "notifier": 1}
+need = {"scheduler": 1, "orchestrator": 1, "engine": engines, "agent": agents, "notifier": 1}
 missing = [f"{k} {kinds.count(k)}/{n}" for k, n in need.items() if kinds.count(k) < n]
 assert not missing, "components not heartbeating: " + ", ".join(missing)
 on = sorted(p["name"] for p in m["providers"] if p["enabled"])
 assert on == sorted(providers), f"enabled providers {on}, expected {sorted(providers)}"
 assert m["workspace_root"] == "/workspace", "workspace not mounted"
-print(len(m["projects"]))' "$AI_TEAM_AGENTS" "$PROVIDERS" 2>&1)" && break
+print(len(m["projects"]))' "$AI_TEAM_AGENTS" "$PROVIDERS" "$AI_TEAM_ENGINES" 2>&1)" && break
   [ "$SECONDS" -lt "$deadline" ] || fail "API check: $(printf '%s' "${err:-API not reachable at $BASE_URL}" | tail -1)"
   sleep 3
 done

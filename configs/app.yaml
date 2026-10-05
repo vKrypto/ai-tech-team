@@ -6,7 +6,8 @@ broker:
   max_deliveries: 5            # poison-message guard
   stream_maxlen: 10000
 engine:
-  max_parallel: 4              # workflows driven at once per engine replica
+  max_parallel: 1              # tasks driven at once per engine replica: one; scale with AI_TEAM_ENGINES replicas
+  lock_seconds: 60             # per-task lock TTL (renewed while driving), so two engines never drive one task
   recursion_limit: 150
 agents:
   concurrency: 1               # jobs per agent replica

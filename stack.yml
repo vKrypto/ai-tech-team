@@ -92,7 +92,9 @@ services:
     <<: *app
     command: ["python", "-m", "app", "engine"]
     volumes: *workspace-ro
-    deploy: *deploy
+    deploy:       # one task per replica; replicas = how many tasks run in parallel
+      <<: *deploy
+      replicas: ${AI_TEAM_ENGINES:-3}
 
   agent:            # agent pool: full-access tools, skills, browser, LLM providers
     <<: *app

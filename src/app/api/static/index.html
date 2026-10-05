@@ -350,7 +350,7 @@ async function viewHome() {
   $("#view").innerHTML = `
     <div class="stats">${CARDS.map(([k, l, f]) => `<a class="stat" href="#/tasks?status=${encodeURIComponent(f)}" style="--c:${ST[k].c}">
       <div class="l"><i></i>${l}</div><div class="n">${n(k)}</div></a>`).join("")}</div>
-    <div class="tiny muted" style="margin:8px 2px 0">${d.total} task${d.total === 1 ? "" : "s"} in total · ${d.busy_agents}/${d.services.agent || 0} agents busy</div>
+    <div class="tiny muted" style="margin:8px 2px 0">${d.total} task${d.total === 1 ? "" : "s"} in total · ${d.busy_engines}/${d.services.engine || 0} engines busy · ${d.busy_agents}/${d.services.agent || 0} agents busy</div>
 
     ${d.waiting.length ? `<div class="section"><h2>Needs your decision</h2><span class="grow"></span><a href="#/tasks?status=hold:human_required">See all</a></div>
     <div class="list">${d.waiting.map(t => `<a class="item" href="#/task/${t.id}" style="border-color:var(--hold)"><div class="row" style="align-items:flex-start"><div class="grow">

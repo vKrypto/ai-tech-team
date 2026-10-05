@@ -46,5 +46,6 @@ def dashboard(limit: int = 5):
                                            TaskStatus.CANCELLED.value]}}, "finished_at"),
         "services": {k: sum(1 for s in services if s["kind"] == k) for k in C.SERVICE_KINDS},
         "busy_agents": sum(1 for s in services if s["kind"] == "agent" and s.get("busy")),
+        "busy_engines": sum(1 for s in services if s["kind"] == "engine" and s.get("busy")),
         "unread": db()[C.C_NOTIFICATIONS].count_documents({"read": False}),
     }

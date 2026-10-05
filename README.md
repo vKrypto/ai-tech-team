@@ -57,7 +57,7 @@ flowchart LR
 |---|---|---|---|
 | `scheduler` | 1 | Dashboard and HTTP API (dashboard-ui-scheduler), cron schedules, Google Calendar polling, GitHub PR watcher and a watchdog. Creates tasks and pushes them to the broker. Also handles follow-ups, retries, cancels, human answers and node re-runs. | `created` |
 | `orchestrator` | 1 | Consumes tasks and works out the task type, project (existing or new), workflow and model tier. Hands the run to the engine. Watches run outcomes: notifications, plus auto-retry of crashed runs. | `queued` |
-| `engine` | 1 | Runs LangGraph workflows. Each step becomes an agent job. Handles state, retries, errors, human holds, node re-execution and crash resume. | `processing`, `hold:human_required`, `done`, `failed` |
+| `engine` | 3 | Runs LangGraph workflows, **one task per replica** (replicas = tasks in parallel, `AI_TEAM_ENGINES`); a replica is free again as soon as its task finishes, fails, is cancelled or waits for you. Each step becomes an agent job. Handles state, retries, errors, human holds, node re-execution and crash resume. | `processing`, `hold:human_required`, `done`, `failed` |
 | `agent` | 3 | Executes jobs in full-access mode: files, shell, git, curl/fetch, web search, Playwright browser, SQLite and skills. Routes to LLM providers with fallback. | — |
 | `notifier` | 1 | Stores every notification and forwards it to the enabled channels. | — |
 | `redis` | 1 | Broker (Redis Streams with consumer groups), workflow checkpoints, job results, cancel flags, heartbeats. AOF with fsync every second, in `data/redis`. | — |

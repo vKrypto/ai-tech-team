@@ -7,7 +7,10 @@ checkpointed in Redis after every node. That gives the engine its guarantees:
 - node re-execution: `rerun` forks the thread from the checkpoint just before that node
 """
 import logging
+import threading
+import time
 import traceback
+from contextlib import contextmanager
 
 from langgraph.types import Command
 
@@ -44,7 +47,46 @@ def _interrupts(snap) -> list:
     return found
 
 
+LOCK = "ait:lock:task:{task_id}"
+
+
+@contextmanager
+def task_lock(task_id: int):
+    """One engine per task. Yields False if another engine holds it. The lock is renewed while held and
+    expires on its own if this engine dies."""
+    from ..persistence.store import redis
+    key, me = LOCK.format(task_id=task_id), f"{settings.host}:{threading.get_ident()}"
+    ttl = int(settings.cfg("engine.lock_seconds", 60))
+    if not redis().set(key, me, nx=True, ex=ttl):
+        yield False
+        return
+    stop = threading.Event()
+
+    def renew():
+        while not stop.wait(ttl / 3):
+            if redis().get(key) == me:
+                redis().expire(key, ttl)
+    threading.Thread(target=renew, daemon=True).start()
+    try:
+        yield True
+    finally:
+        stop.set()
+        if redis().get(key) == me:
+            redis().delete(key)
+
+
 def handle(cmd: WorkflowCommand) -> None:
+    with task_lock(cmd.task_id) as mine:
+        if not mine:
+            # another engine is driving this task: put the command back for later and stay free for others
+            events.emit(cmd.task_id, SRC, "status", f"`{cmd.kind}` deferred: another engine is driving this task")
+            time.sleep(5)
+            publish(C.STREAM_WORKFLOWS, cmd)
+            return
+        _handle(cmd)
+
+
+def _handle(cmd: WorkflowCommand) -> None:
     task = tasks.get(cmd.task_id)
     if task is None:
         log.warning("command for unknown task %s", cmd.task_id)

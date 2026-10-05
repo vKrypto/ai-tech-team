@@ -78,10 +78,11 @@ services:
     hostname: orchestrator
     command: ["python", "-m", "app", "orchestrator"]
 
-  engine:
+  engine:                          # one task per replica; replicas = parallel tasks
     <<: *app
-    hostname: engine
     command: ["python", "-m", "app", "engine"]
+    deploy:
+      replicas: ${AI_TEAM_ENGINES:-2}
 
   agent:
     <<: *app
