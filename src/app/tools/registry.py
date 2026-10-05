@@ -44,7 +44,7 @@ def build(ctx: ToolContext, groups: list[str]) -> list:
 
 GROUP_INFO = {
     "filesystem": "Read, write, edit and search files in the workspace",
-    "shell": "Run any shell command: tests, builds, package managers, curl, scripts",
+    "shell": "Run any shell command (bash): tests, builds, scripts. Installed: python + pytest + uv, node + npm, git, gh, curl, jq, ripgrep, sqlite3",
     "git": "Status, diff and local commits (push only when enabled)",
     "github": "GitHub CLI: pull requests, reviews, issues, projects",
     "web": "Web search and HTTP requests",

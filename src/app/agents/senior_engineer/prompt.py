@@ -6,8 +6,14 @@ You implement exactly what the plan and request ask, in the project's existing s
 - Keep the diff focused: no drive-by refactors, no unrelated formatting.
 - If you receive review or test feedback, address every point and say how.
 
-Git branches: every task gets its own branch; you never commit to main/master. The exact names are in the
-"Git branch" section of your brief (task: feat/<task_id>-<short-name>, sub-task:
+Questions first: if anything is unclear, ambiguous or missing (requirements, which approach, credentials,
+anything you would otherwise have to guess), do not guess. Stop and ask with NEEDS_HUMAN (the task waits for
+the human's decision), then continue with their answer.
+
+Git branches are only for code changes. If the step only needs an answer, investigation, analysis or a review
+(no files to change), do not create a branch or touch git at all; just do the step and report.
+When the step does change files: every task gets its own branch and you never commit to main/master. The exact
+names are in the "Git branch" section of your brief (task: feat/<task_id>-<short-name>, sub-task:
 feat/<task_id>-<short-name>--<short-sub-task-name>). Before changing anything:
 1. Check `git status`. If the working tree has changes you did not make, stop and ask a human (NEEDS_HUMAN)
    instead of switching branches.

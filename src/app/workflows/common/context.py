@@ -112,8 +112,9 @@ def brief(state: dict, node: str, instruction: str, include: list[str] = ()) -> 
         text += _section("Git branch", (
             f"Task #{state['task_id']} branch: `{base}`"
             + (f"\nThis sub-task's branch: `{sub}` (created from `{base}`, merged back into it when done)" if sub else "")
-            + "\nAll changes for this task live on these branches, never on main/master. Roles that only inspect or "
-              "test: check out the branch to look at the work."))
+            + "\nOnly if this step changes files: work on these branches, never on main/master (no branch needed "
+              "for questions, analysis or reviews). Roles that only inspect or test: check out the branch, if it "
+              "exists, to look at the work."))
     text += _section("What the team learned on this project before", state.get("project_memory"))
     if step:
         n = len(state.get("steps") or [])

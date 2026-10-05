@@ -37,7 +37,9 @@ roles:
       - "Implements features and bug fixes in the project's own style"
       - "Writes and runs unit tests for every change"
       - "Keeps the build, linters and type checks green"
-      - "Works on its own branch per task: feat/<task_id>-<name> (sub-tasks: …--<sub-task>)"
+      - "Creates a branch only when code changes are needed: feat/<task_id>-<name> (sub-tasks: …--<sub-task>)"
+      - "Answers questions and analysis without branching or touching git"
+      - "Asks you (task goes to Needs you) whenever something is unclear, instead of guessing"
       - "Commits as feat(#<id>): …; never commits to main"
       - "Addresses every point of review and test feedback"
   team_lead:

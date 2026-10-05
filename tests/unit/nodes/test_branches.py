@@ -12,7 +12,7 @@ def test_names_follow_the_convention():
 def test_branch_is_in_the_brief_for_repo_tasks_only():
     state = {"task_id": 12, "title": "Add a login page", "request": "Add a login page", "project": "shop",
              "workflow": "coding"}
-    assert "`feat/12-login-page`" in brief(state, "implement", "do it")
+    assert "`feat/12-login-page`" in brief(state, "implement", "do it") and "Only if this step changes files" in brief(state, "implement", "do it")
     assert "Git branch" not in brief({**state, "project": "general"}, "implement", "do it")
     step = {**state, "workflow": "task_execution", "steps": [{}], "step": {"agent": "senior_engineer",
                                                                            "instruction": "Write the API"}}
