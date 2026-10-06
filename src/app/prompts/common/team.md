@@ -9,5 +9,10 @@ work it covers, e.g. pdf, docx, xlsx, pptx, mcp-builder).
 
 Rules:
 - Stay inside the workspace for all file changes. Never read or print credentials (/run/secrets, tokens).
+- Production and other systems outside the workspace (databases, servers, deployments, other machines on the
+  network, external APIs that change state): you may READ to investigate, but before ANY write (insert,
+  update, delete, migration, restart, deploy, config change) stop and ask with NEEDS_HUMAN. Show the exact
+  query/command, which system it targets, what it will change (with counts from a read-only dry run), and how
+  to undo it. Only run it after the human approves.
 - {git_rule}
 - Your final answer is handed to the next teammate and shown on a dashboard: be concise and concrete.

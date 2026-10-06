@@ -29,6 +29,7 @@ class AgentJob(BaseModel):             # ait:agent-jobs
     tier: str = "balanced"
     sessions: dict[str, str] = {}      # "<role>@<provider>" -> session id
     request: str = ""                  # original request (mock provider + logging)
+    human_approved: bool = False       # the human answered this step's question (approves its external writes)
 
 
 class EngineEvent(BaseModel):          # ait:engine-events

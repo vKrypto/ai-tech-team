@@ -143,7 +143,8 @@ def run_agent(state: dict, node: str, role: str, instruction: str, include: list
     job = AgentJob(job_id=ctx.job_id(node, seq, state.get("_attempt", 0)), task_id=ctx.task_id,
                    run_id=ctx.run_id, node=node, role=role, brief=brief(state, node, instruction, include),
                    project=state.get("project"), tier=tier or state.get("tier") or "balanced",
-                   sessions=state.get("sessions") or {}, request=state.get("request", ""))
+                   sessions=state.get("sessions") or {}, request=state.get("request", ""),
+                   human_approved=bool((state.get("human_answer") or {}).get("node") == node))
     events.emit(ctx.task_id, f"engine/{node}", "status", f"dispatching to {role} (job {job.job_id})", ctx.run_id)
     t0 = time.monotonic()
     result = dispatch_and_wait(job)

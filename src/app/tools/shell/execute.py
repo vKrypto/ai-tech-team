@@ -2,7 +2,7 @@ import subprocess
 
 from langchain_core.tools import tool
 
-from ...guardrails.tool_permissions import check_command, resolve_path
+from ...guardrails.tool_permissions import check_command, check_external_write, resolve_path
 from ...settings import settings
 from ..base import ToolContext, guarded
 
@@ -23,6 +23,8 @@ def make(ctx: ToolContext):
     def run_command(command: str, cwd: str = ".") -> str:
         """Run any shell command (bash) in `cwd` (relative to the project folder): tests, builds,
         package managers, curl, git, scripts. Full access inside the workspace."""
-        return run(command, resolve_path(cwd, ctx.cwd))
+        workdir = resolve_path(cwd, ctx.cwd)
+        check_external_write(command, workdir, ctx.external_writes_approved)
+        return run(command, workdir)
 
     return [run_command]

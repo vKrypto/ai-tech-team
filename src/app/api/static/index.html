@@ -145,6 +145,10 @@
   .tl-head { display: flex; gap: 8px; align-items: center; min-width: 0; }
   .tl-head b { font-size: 14.5px; }
   .tl-children { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .tl-row.chat > .dot.you { background: var(--accent); } .tl-row.chat > .dot.team { background: var(--done); }
+  .tl-row.chat .msg.user { margin: 0 0 0 auto; }
+  .answer { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; border-left: 3px solid var(--done); }
+  .answer .who, .tl-row .msg .who { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; font-weight: 700; }
   .tl-msg { font-size: 14px; } .tl-meta { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
   .tl-err { font-size: 13px; color: var(--failed); white-space: pre-wrap; overflow-wrap: anywhere; }
   .tl-human { font-size: 13.5px; color: var(--hold); font-weight: 600; white-space: pre-wrap; }
@@ -537,7 +541,7 @@ async function viewTask(first) {
   renderTaskHead(); renderHold(); renderTabs();
   const key = `${S.tab}:${task.status}:${task.turn}:${S.runId}`;
   if (S.tab === "graph") await renderGraph();
-  else if (S.tab === "timeline") S.tlRaw ? renderActivity() : renderTimeline();
+  else if (S.tab === "timeline") { if (S.tlRaw) renderActivity(); else { S.msgs = await api(`/api/tasks/${id}/messages`); renderTimeline(); } }
   else if ($("#tabbody").dataset.key !== key || first) { $("#tabbody").dataset.key = key; S.tab === "chat" ? await renderChat() : await renderRuns(); }
 }
 
@@ -587,7 +591,7 @@ function renderHold() {
 }
 
 function renderTabs() {
-  const tabs = [["timeline", "Timeline"], ["graph", "Workflow"], ["chat", "Conversation"], ["runs", "Runs"]];
+  const tabs = [["timeline", "Timeline"], ["graph", "Workflow"], ["runs", "Runs"]];
   $("#tabs").innerHTML = tabs.map(([k, l]) => `<button class="${S.tab === k ? "on" : ""}" data-k="${k}">${l}</button>`).join("");
   $$("#tabs button").forEach(b => b.onclick = () => {
     S.tab = b.dataset.k; S.graphKey = ""; $("#tabbody").innerHTML = ""; $("#tabbody").dataset.key = "";
@@ -771,11 +775,14 @@ function renderActivity() {
 
 // ---- timeline (Claude-style transcript of what the agents did)
 const SKIP_STATUS = /^(dispatching to |job \S+ (ok|failed) after|picked up `|finished `)/;
-function buildTimeline(events) {
+function buildTimeline(events, messages = []) {
   const items = [], tools = {};
   let step = null;
   const child = it => (step ? step.children : items).push(it);
-  for (const e of events) {
+  const chat = messages.map(m => ({ kind: "chat", ts: m.ts, role: m.role, content: m.content, turn: m.turn }));
+  const all = [...events, ...chat].sort((a, b) => new Date(a.ts) - new Date(b.ts) || (a.kind === "chat") - (b.kind === "chat"));
+  for (const e of all) {
+    if (e.kind === "chat") { step = null; items.push({ type: "chat", role: e.role, text: e.content, turn: e.turn }); continue; }
     const d = e.data || {}, src = e.source || "";
     if (d.phase === "start") { step = { type: "step", step: d.step, status: "running", ts: e.ts, children: [] }; items.push(step); continue; }
     if (["done", "failed", "waiting"].includes(d.phase)) {
@@ -833,10 +840,24 @@ function tlChild(c) {
 }
 function renderTimeline() {
   const body = $("#tabbody");
-  if (!$("#tl")) body.innerHTML = `<div class="row" style="margin-bottom:10px"><span class="grow small muted">What the team did, step by step</span><button id="tlraw">Activity log</button></div><div class="tl" id="tl"></div>`;
+  if (!$("#tl")) {
+    body.innerHTML = `<div class="row" style="margin-bottom:10px"><span class="grow small muted">Your requests, what the team did, and its answers</span><button id="tlraw">Activity log</button></div>
+      <div class="tl" id="tl"></div>
+      <div class="composer"><div class="card" style="padding:10px"><textarea id="followtext" style="min-height:56px"></textarea>
+      <button class="primary" id="followsend" style="width:100%;margin-top:8px">Send follow-up</button></div></div>`;
+    $("#followsend").onclick = async () => {
+      const text = $("#followtext").value.trim(); if (!text) return;
+      try { await api(`/api/tasks/${S.task.id}/messages`, { method: "POST", body: { text } }); $("#followtext").value = ""; toast("Follow-up sent"); refresh(true); }
+      catch (e) { fail(e); }
+    };
+  }
+  const canFollow = FINISHED.includes(S.task.status);
+  $("#followtext").disabled = !canFollow; $("#followsend").disabled = !canFollow;
+  $("#followtext").placeholder = canFollow ? "Follow up: ask a question or request another iteration…"
+    : S.task.status === "hold:human_required" ? "Answer the decision above first." : "You can follow up once the team has finished.";
   $("#tlraw").onclick = () => { S.tlRaw = true; $("#tabbody").innerHTML = ""; renderActivity(); };
   const nearBottom = innerHeight + scrollY >= document.body.scrollHeight - 120;
-  const items = buildTimeline(S.events.map(normEvent));
+  const items = buildTimeline(S.events.map(normEvent), S.msgs || []);
   $("#tl").innerHTML = items.map(it => {
     if (it.type === "step") {
       const label = { running: "running", done: "done", failed: "failed", waiting: "needs you" }[it.status];
@@ -846,6 +867,11 @@ function renderTimeline() {
           <span class="tiny muted grow ellipsis">${esc([it.provider, it.worker].filter(Boolean).join(" · "))}</span>
           <span class="tiny muted">${label}${secs}</span></div>
         ${it.children.length ? `<div class="tl-children">${it.children.map(tlChild).join("")}</div>` : ""}</div>`;
+    }
+    if (it.type === "chat") {
+      if (it.role === "user") return `<div class="tl-row chat"><i class="dot you"></i><div class="msg user"><div class="who">you · turn ${it.turn}</div>${esc(it.text)}</div></div>`;
+      if (it.role === "assistant") return `<div class="tl-row chat"><i class="dot team"></i><div class="answer"><div class="who">team · answer · turn ${it.turn}</div><div class="md">${md(it.text)}</div></div></div>`;
+      return `<div class="tl-row meta"><i class="dot"></i><div class="tl-meta">${esc(it.text)}</div></div>`;
     }
     if (it.type === "human") return `<div class="tl-row st-waiting"><i class="dot"></i><div class="tl-human">${esc(it.text)}</div></div>`;
     if (it.type === "error") return `<div class="tl-row st-failed"><i class="dot"></i><div class="tl-err">${esc(it.text)}</div></div>`;

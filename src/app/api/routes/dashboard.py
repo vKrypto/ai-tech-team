@@ -82,5 +82,6 @@ def _agents(services: list[dict]) -> dict:
             "limits": ["Files only inside the workspace; the ai-team folder and " + ", ".join(map(str, SECRET_DIRS)) + " are hidden",
                        "Host-destroying commands are refused (rm -rf /, mkfs, sudo, …)",
                        "Secrets are redacted from everything stored or shown",
+                       "Writes to production or other machines (databases, servers, deploys) need your approval first",
                        "git push " + ("allowed for feature branches" if settings.git_push_enabled else "disabled")],
             "cli_note": "Claude Code / Codex agents use their built-in equivalents of these tools plus the Playwright browser (MCP)."}

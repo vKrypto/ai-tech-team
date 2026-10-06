@@ -41,6 +41,7 @@ class AgentRequest:
     log: Callable[..., None] = lambda kind, msg, data=None: None
     cancelled: Callable[[], bool] = lambda: False
     changed: set = field(default_factory=set)
+    human_approved: bool = False
 
 
 @dataclass
@@ -96,7 +97,7 @@ class ChatModelProvider(Provider):
         thread = req.session or f"lc:{self.name}:{req.task_id}:{req.role}:{uuid.uuid4().hex[:8]}"
         if req.session:
             req.log("status", f"resuming conversation {thread}")
-        ctx = ToolContext(cwd=req.cwd, log=req.log, changed=req.changed)
+        ctx = ToolContext(cwd=req.cwd, log=req.log, changed=req.changed, external_writes_approved=req.human_approved)
         agent = create_agent(self.chat_model(model), registry.build(ctx, req.tool_groups),
                              system_prompt=req.system_prompt, name=req.role, checkpointer=checkpoints.get())
         final, tin, tout = "", 0, 0

@@ -87,7 +87,7 @@ class Agent:
                                system_prompt=system, brief=brief, tier=tier, cwd=cwd,
                                session=job.sessions.get(f"{self.role}@{provider.name}"),
                                tool_groups=tool_selector.groups_for(self.role), request=job.request,
-                               log=log, cancelled=cancelled, changed=changed)
+                               log=log, cancelled=cancelled, changed=changed, human_approved=job.human_approved)
             return provider.run_agent(req)
 
         resp, provider = fallback.run(

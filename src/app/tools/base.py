@@ -17,6 +17,7 @@ class ToolContext:
     cwd: Path                                  # the project folder (or workspace root)
     log: Callable[..., None] = lambda kind, msg, data=None: None
     changed: set = field(default_factory=set)  # workspace-relative paths written during the job
+    external_writes_approved: bool = False     # a human approved this step's writes outside the workspace
 
     def rel(self, p: Path) -> str:
         try:
