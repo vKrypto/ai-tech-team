@@ -7,3 +7,4 @@ stack.generated.yml
 *.egg-info/
 .env.*
 !.env.example
+vendor/

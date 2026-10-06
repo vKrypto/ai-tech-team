@@ -36,12 +36,11 @@ ARG GID=1000
 RUN groupadd -g ${GID} agent && useradd -u ${UID} -g ${GID} -m agent && mkdir -p /data && chown agent:agent /data
 USER agent
 
-# Claude Code CLI (provider type claude_code) and Codex CLI (provider type codex)
-RUN curl -fsSL https://claude.ai/install.sh | bash
+# Claude Code CLI (provider type claude_code) and Codex CLI (provider type codex): copied from vendor/cli/,
+# which scripts/fetch_clis.sh fills once (deploy.sh runs it), so builds never download them.
+RUN mkdir -p /home/agent/.local/bin
+COPY --chown=agent:agent vendor/cli/claude vendor/cli/codex /home/agent/.local/bin/
 ENV PATH=/home/agent/.local/bin:$PATH DISABLE_AUTOUPDATER=1
-ARG CODEX_VERSION=0.160.0
-RUN curl -fsSL "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-x86_64-unknown-linux-musl.tar.gz" \
-      | tar xz -C /tmp && mv /tmp/codex-x86_64-unknown-linux-musl /home/agent/.local/bin/codex
 
 COPY --chown=agent:agent configs configs
 COPY --chown=agent:agent src src

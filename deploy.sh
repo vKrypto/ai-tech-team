@@ -87,6 +87,8 @@ if [ "$(dk info --format '{{.Swarm.LocalNodeState}}')" != "active" ]; then
 fi
 
 # --- Image ---------------------------------------------------------------------------------------
+echo "agent CLIs…"
+scripts/fetch_clis.sh   # vendor/cli/: downloaded once, reused by every build
 TS="$(date +%Y%m%d-%H%M%S)"   # unique tag so `stack deploy` actually rolls the services
 BUILD_ARGS=(--build-arg UID="$(id -u)" --build-arg GID="$(id -g)")
 if [ -n "$REGISTRY" ]; then
