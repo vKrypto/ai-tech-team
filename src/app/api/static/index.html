@@ -149,7 +149,11 @@
   .tl-row.chat .msg.user { margin: 0 0 0 auto; }
   .answer { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; border-left: 3px solid var(--done); }
   .answer .who, .tl-row .msg .who { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 4px; font-weight: 700; }
-  .tl-msg { font-size: 14px; } .tl-meta { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+  .tl-msg { font-size: 14px; }
+  .chatbar { display: flex; gap: 8px; align-items: flex-end; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 6px; box-shadow: var(--shadow); }
+  .chatbar textarea { min-height: 40px; max-height: 160px; border: 0; box-shadow: none; resize: none; padding: 9px 8px; background: transparent; }
+  .chatbar button { width: 40px; min-width: 40px; height: 40px; min-height: 40px; padding: 0; border-radius: 12px; display: grid; place-items: center; }
+  .chatbar button svg { width: 20px; height: 20px; } .tl-meta { font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
   .tl-err { font-size: 13px; color: var(--failed); white-space: pre-wrap; overflow-wrap: anywhere; }
   .tl-human { font-size: 13.5px; color: var(--hold); font-weight: 600; white-space: pre-wrap; }
   details.tool { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); min-width: 0; }
@@ -843,8 +847,11 @@ function renderTimeline() {
   if (!$("#tl")) {
     body.innerHTML = `<div class="row" style="margin-bottom:10px"><span class="grow small muted">Your requests, what the team did, and its answers</span><button id="tlraw">Activity log</button></div>
       <div class="tl" id="tl"></div>
-      <div class="composer"><div class="card" style="padding:10px"><textarea id="followtext" style="min-height:56px"></textarea>
-      <button class="primary" id="followsend" style="width:100%;margin-top:8px">Send follow-up</button></div></div>`;
+      <div class="composer"><div class="chatbar"><textarea id="followtext" rows="1"></textarea>
+      <button class="primary" id="followsend" aria-label="Send follow-up">${svg('<path d="M5 12h14M13 6l6 6-6 6"/>')}</button></div></div>`;
+    const grow = () => { const t = $("#followtext"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 160) + "px"; };
+    $("#followtext").addEventListener("input", grow);
+    $("#followtext").addEventListener("keydown", e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) $("#followsend").click(); });
     $("#followsend").onclick = async () => {
       const text = $("#followtext").value.trim(); if (!text) return;
       try { await api(`/api/tasks/${S.task.id}/messages`, { method: "POST", body: { text } }); $("#followtext").value = ""; toast("Follow-up sent"); refresh(true); }
@@ -853,8 +860,8 @@ function renderTimeline() {
   }
   const canFollow = FINISHED.includes(S.task.status);
   $("#followtext").disabled = !canFollow; $("#followsend").disabled = !canFollow;
-  $("#followtext").placeholder = canFollow ? "Follow up: ask a question or request another iteration…"
-    : S.task.status === "hold:human_required" ? "Answer the decision above first." : "You can follow up once the team has finished.";
+  $("#followtext").placeholder = canFollow ? "Send a follow-up…"
+    : S.task.status === "hold:human_required" ? "Answer the decision first" : "Follow up once the team is done";
   $("#tlraw").onclick = () => { S.tlRaw = true; $("#tabbody").innerHTML = ""; renderActivity(); };
   const nearBottom = innerHeight + scrollY >= document.body.scrollHeight - 120;
   const items = buildTimeline(S.events.map(normEvent), S.msgs || []);
