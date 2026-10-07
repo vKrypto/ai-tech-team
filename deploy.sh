@@ -3,6 +3,7 @@
 #   ./deploy.sh                    deploy with .env.prod
 #   ./deploy.sh --env FILE         deploy with another env file (target, providers, channels…)
 #   ./deploy.sh --relogin          log the CLI providers and GitHub in again
+#   ./deploy.sh --codex-auth-file F  push a Codex login (auth.json from a separate `codex login`) to the target
 #   ./deploy.sh --smoke            after deploying, run one small real task end to end
 #
 # Target (in the env file):
@@ -25,11 +26,13 @@ SECRET_PREFIX=ai_team_claude_token_
 ENV_FILE=.env.prod
 RELOGIN=false
 SMOKE=false
+CODEX_AUTH_FILE="${CODEX_AUTH_FILE:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --env) ENV_FILE="$2"; shift ;;
     --relogin) RELOGIN=true ;;
     --smoke) SMOKE=true ;;
+    --codex-auth-file) CODEX_AUTH_FILE="$2"; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -152,6 +155,16 @@ claude_login() {
   ( umask 077; printf '%s' "$token" > "$CLAUDE_TOKEN_FILE" )
   echo "saved token to $CLAUDE_TOKEN_FILE"
 }
+# Codex: ChatGPT login = <data>/codex/auth.json on the target, mounted read-write into the agents and the
+# orchestrator. Unlike Claude's fixed token it can't be a swarm secret: Codex rewrites auth.json whenever it
+# refreshes the session, so the target's copy is the source of truth and deploys never overwrite it unless
+# it's invalid, --relogin, or a new file is pushed.
+codex_prepare() {   # file-based credential store, private dir
+  dk run --rm --user 0 -v "$DATA_HOST_DIR/codex:/c" "$TAG" sh -c "
+    touch /c/config.toml && grep -q '^cli_auth_credentials_store' /c/config.toml ||
+      printf 'cli_auth_credentials_store = \"file\"\n' >> /c/config.toml
+    chown -R $UIDGID /c && chmod 700 /c && chmod 600 /c/config.toml"
+}
 codex_check() {
   local out
   out="$(dk run --rm -v "$DATA_HOST_DIR/codex:/data/codex" -e CODEX_HOME=/data/codex -w /tmp "$TAG" sh -c \
@@ -159,10 +172,29 @@ codex_check() {
   echo "$out"; [[ "$out" == *OK* ]]
 }
 codex_login() {
-  need_tty "Codex login"
-  echo "== Codex login: open the URL shown, sign in with ChatGPT and enter the code. =="
+  [ -n "$CODEX_AUTH_FILE" ] && { codex_push_file "$CODEX_AUTH_FILE"; return; }
+  need_tty "Codex login (or pass --codex-auth-file / CODEX_AUTH_FILE)"
+  echo "== Codex login for the server: open the URL shown, sign in with ChatGPT and enter the code. =="
+  echo "   (If device login is disabled: ChatGPT → Settings → Security → enable device code auth for Codex.)"
   dk run --rm -it -v "$DATA_HOST_DIR/codex:/data/codex" -e CODEX_HOME=/data/codex "$TAG" \
     codex login --device-auth -c 'cli_auth_credentials_store="file"'
+}
+codex_push_file() {   # validate locally (never printing it), then copy to <data>/codex/auth.json with mode 600
+  local f="$1"
+  [ -s "$f" ] || { echo "  ✗ codex auth file '$f' not found or empty" >&2; exit 1; }
+  if [ "$(realpath "$f")" = "$(realpath -m "$HOME/.codex/auth.json")" ] && [ "${CODEX_ALLOW_HOST_SESSION:-}" != 1 ]; then
+    echo "  ✗ that is this machine's own Codex session: sharing it makes the server and this machine log each other out" >&2
+    echo "    (refresh tokens rotate). Make a separate one:  CODEX_HOME=\$(mktemp -d) codex login  and pass that auth.json." >&2
+    exit 1
+  fi
+  python3 - "$f" <<'PY' || { echo "  ✗ '$f' is not a Codex auth.json (expected tokens.refresh_token or OPENAI_API_KEY)" >&2; exit 1; }
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert (d.get("tokens") or {}).get("refresh_token") or d.get("OPENAI_API_KEY")
+PY
+  dk run --rm -i --user 0 -v "$DATA_HOST_DIR/codex:/c" "$TAG" sh -c \
+    "cat > /c/auth.json.new && chmod 600 /c/auth.json.new && chown $UIDGID /c/auth.json.new && mv /c/auth.json.new /c/auth.json" < "$f"
+  echo "  ✓ pushed codex login to $DATA_HOST_DIR/codex/auth.json (mode 600)"
 }
 # GitHub: gh login stored in <data>/github (GH_CONFIG_DIR), shared by agents and the PR watcher.
 # Non-interactive: GH_TOKEN=... ./deploy.sh (use a bot account's fine-grained token).
@@ -209,7 +241,13 @@ if has_provider claude; then
   SECRET="$SECRET_PREFIX$(sha256sum "$CLAUDE_TOKEN_FILE" | cut -c1-12)"
   dk secret inspect "$SECRET" >/dev/null 2>&1 || { dk secret create "$SECRET" "$CLAUDE_TOKEN_FILE" >/dev/null; echo "  ✓ created swarm secret $SECRET"; }
 fi
-has_provider codex && ensure_login Codex codex_check codex_login
+if has_provider codex; then
+  codex_prepare
+  if [ -n "$CODEX_AUTH_FILE" ]; then codex_push_file "$CODEX_AUTH_FILE"; fi   # explicit new login wins
+  ensure_login Codex codex_check codex_login
+elif [ -n "$CODEX_AUTH_FILE" ]; then
+  echo "  ! --codex-auth-file given but codex isn't in AI_TEAM_PROVIDERS; add it to $ENV_FILE to use Codex" >&2
+fi
 if has_provider omniroute; then out="$(omniroute_check)" || { echo "  ✗ omniroute: $out" >&2; exit 1; }; echo "  ✓ omniroute: $out"; fi
 if $GITHUB; then ensure_login GitHub github_check github_login; fi
 

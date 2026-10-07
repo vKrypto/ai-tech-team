@@ -209,10 +209,21 @@ Named providers in `configs/models.yaml`, switched on with `AI_TEAM_PROVIDERS` i
 |---|---|---|---|
 | `claude` | `claude_code` | Claude Code CLI (native tools, skills, Playwright MCP, `--resume`) | subscription token from `claude setup-token`; `./deploy.sh` does the login → swarm secret |
 | `omniroute` | `openai` | LangChain agent with our tools | self-hosted OpenAI-compatible gateway (`AI_TEAM_OMNIROUTE_URL`) |
-| `codex` | `codex` | Codex CLI | ChatGPT device login, run by `./deploy.sh` |
+| `codex` | `codex` | Codex CLI | ChatGPT login obtained by `./deploy.sh` (device login, or `--codex-auth-file`) → `<data>/codex/auth.json` on the server |
 | `anthropic` | `anthropic` | LangChain | `ANTHROPIC_API_KEY` |
 | `mock` | `mock` | fake, deterministic | none (runs the whole platform for free) |
 
+- **Codex login.** Add `codex` to `AI_TEAM_PROVIDERS` in `.env.prod`. On every deploy, `./deploy.sh` checks
+  the login on the server with one tiny real call. If the login is missing or rejected, it gets a new one:
+  - **Interactive:** the ChatGPT device login runs on the server; you enter a code in your browser.
+  - **From a file:** `./deploy.sh --codex-auth-file <auth.json>` (or `CODEX_AUTH_FILE=…`) pushes a login made
+    with `CODEX_HOME=$(mktemp -d) codex login`. The file is validated and stored with mode 600.
+
+  The login lives in `<data>/codex` (mode 700), which agents and the orchestrator mount read-write. It can't
+  be a swarm secret like Claude's token, because Codex rewrites `auth.json` whenever it refreshes. For the same
+  reason a deploy never overwrites a working login, and the script refuses this machine's own
+  `~/.codex/auth.json`: refresh tokens rotate, so two machines sharing one session log each other out.
+  `--relogin` forces a fresh login.
 - **Routing.** Each role has an ordered chain. The first enabled provider is used, the next ones are
   fallbacks. Defaults: `claude → omniroute → …` for agents, `omniroute → claude → …` for the
   orchestrator (cheap triage).
